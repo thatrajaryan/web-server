@@ -1,7 +1,9 @@
 package main
 
-import "fmt"
+import (
+    "github.com/thatrajaryan/web-server/api_gateway"
+)
 
 func main() {
-    fmt.Println("Go project initialized!")
+    api_gateway.api_gateway()
 }

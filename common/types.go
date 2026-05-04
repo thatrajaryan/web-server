@@ -9,3 +9,8 @@ type HttpResponse struct {
 	Status int
 	Message string
 }
+
+type Server struct {
+	IpAddress string
+	Port int
+}

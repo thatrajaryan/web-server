@@ -1,27 +1,18 @@
-/*
-Load Balancer that receives multiple server instances to redirect to
-Here we are just using Round Robin
-*/
-
-package serverside
+package load_balancer
 
 import (
 	"log"
+	"github.com/thatrajaryan/web-server/common"
 )
 
-type Server struct {
-	Ipaddress string
-	Port int
-}
-
 type LoadBalancer struct {
-	Servers map[int]Server
-	ServerList [1000]int
+	Servers map[int]common.Server
+	ServerList []int
 	Pointer int
 	ServerPointer int
 }
 
-func (loadBalancer LoadBalancer) addServer(id int, server Server) {
+func (loadBalancer *LoadBalancer) AddServer(id int, server common.Server) {
 	_, ok := loadBalancer.Servers[id]
 	if ok {
 		log.Fatalf("Server already exists")
@@ -32,7 +23,7 @@ func (loadBalancer LoadBalancer) addServer(id int, server Server) {
 	loadBalancer.Pointer += 1
 }
 
-func (loadBalancer LoadBalancer) getServer() Server {
+func (loadBalancer *LoadBalancer) GetServer() common.Server {
 	server, _ := loadBalancer.Servers[loadBalancer.ServerList[loadBalancer.ServerPointer]]
 	loadBalancer.ServerPointer = (loadBalancer.ServerPointer + 1) % loadBalancer.Pointer
 	return server

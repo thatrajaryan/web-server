@@ -1,10 +1,10 @@
-package clientside
+package client
 
 import (
     "fmt"
-	"crypto/tls"
+    "crypto/tls"
     "encoding/json"
-    "github.com/thatrajaryan/webserver/common"
+    "github.com/thatrajaryan/web-server/common"
 )
 
 func main() {
