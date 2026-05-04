@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-func servers() {
+func Initialize() {
 	// WaitGroup keeps the main program running as long as the servers are active
 	var wg sync.WaitGroup
 	

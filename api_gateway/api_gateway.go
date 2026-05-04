@@ -17,7 +17,7 @@ import (
 	"github.com/thatrajaryan/web-server/load_balancer"
 )
 
-func api_gateway() {
+func ApiGateway() {
 	// 1. Load your certificate and private key
 	cert, err := tls.LoadX509KeyPair("server.pem", "server.key")
     if err != nil {
@@ -33,6 +33,20 @@ func api_gateway() {
     }
     defer ln.Close()
 
+	// Initialize Load Balancer
+	loadBalancer := load_balancer.LoadBalancer{ 
+		Servers: map[int]common.Server{ 
+			0: common.Server{ IpAddress: "localhost", Port: 8081},
+			1: common.Server{ IpAddress: "localhost", Port: 8082},
+			2: common.Server{ IpAddress: "localhost", Port: 8083},
+			3: common.Server{ IpAddress: "localhost", Port: 8084},
+			4: common.Server{ IpAddress: "localhost", Port: 8085},
+		},
+		ServerList: []int{0, 1, 2, 3, 4},
+		Pointer: 5,
+		ServerPointer: 0,
+	}
+
 	session_timestamp := make(map[int]int64)
 	for {
 		// Accept incoming connection
@@ -41,13 +55,15 @@ func api_gateway() {
 			log.Fatalf("Failed to Accept Connection: %v", err)
 			continue
 		}
+		server := loadBalancer.GetServer()
+		fmt.Printf("Connecting to Server: %s:%d", server.IpAddress, server.Port)
 
 		// handling connection as a goroutine
-		go handleConnection(conn, session_timestamp)
+		go handleConnection(conn, session_timestamp, server)
 	}
 }
 
-func handleConnection(conn net.Conn, session_timestamp map[int]int64) {
+func handleConnection(conn net.Conn, session_timestamp map[int]int64, server common.Server) {
 	defer conn.Close()
 	
 	reader := bufio.NewReader(conn)
@@ -75,21 +91,6 @@ func handleConnection(conn net.Conn, session_timestamp map[int]int64) {
 		conn.Write(data)
 		return
 	}
-
-	loadBalancer := load_balancer.LoadBalancer{ 
-		Servers: map[int]common.Server{ 
-			0: common.Server{ IpAddress: "localhost", Port: 8081},
-			1: common.Server{ IpAddress: "localhost", Port: 8082},
-			2: common.Server{ IpAddress: "localhost", Port: 8083},
-			3: common.Server{ IpAddress: "localhost", Port: 8084},
-			4: common.Server{ IpAddress: "localhost", Port: 8085},
-		},
-		ServerList: []int{0, 1, 2, 3, 4},
-		Pointer: 5,
-		ServerPointer: 0,
-	}
-	server := loadBalancer.GetServer()
-	fmt.Printf("Connecting to Server: %s:%d", server.IpAddress, server.Port)
 	response := common.HttpResponse{ Status: 201, Message: "Message Received by Server\n" }
 	data, err := json.Marshal(response)
 	if err != nil {
