@@ -1,14 +1,18 @@
 package main
 
 import (
-    "fmt"
-	"github.com/thatrajaryan/web-server/api_gateway"
-    "github.com/thatrajaryan/web-server/server"
+	"fmt"
+	"net/http"
+
+	"github.com/thatrajaryan/web-server/api"
 )
 
 func main() {
-    fmt.Println("Initalizing Servers")
-    go server.Initialize()
-    fmt.Println("Forming API Gateway and Load Balancer Services")
-	go api_gateway.ApiGateway()
+	fmt.Println("Starting Management API on port 8080")
+	mux := http.NewServeMux()
+	api.RegisterRoutes(mux)
+
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		fmt.Printf("Failed to start API server: %v\n", err)
+	}
 }

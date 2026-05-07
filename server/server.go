@@ -4,7 +4,43 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"github.com/thatrajaryan/web-server/common"
 )
+
+type ServerBlock struct {
+	IP   string
+	Port int
+}
+
+func (b *ServerBlock) Create(config map[string]interface{}) error {
+	// Implementation to be added later
+	return nil
+}
+
+func (b *ServerBlock) Connect(target common.Block) error {
+	// Implementation to be added later
+	return nil
+}
+
+func (b *ServerBlock) Update(config map[string]interface{}) error {
+	return nil
+}
+
+func (b *ServerBlock) Delete() error {
+	return nil
+}
+
+func (b *ServerBlock) Status() string {
+	return "Active"
+}
+
+func (b *ServerBlock) Start() error {
+	return nil
+}
+
+func (b *ServerBlock) Stop() error {
+	return nil
+}
 
 func Initialize() {
 	// WaitGroup keeps the main program running as long as the servers are active

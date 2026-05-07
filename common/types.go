@@ -14,3 +14,13 @@ type Server struct {
 	IpAddress string
 	Port int
 }
+
+type Block interface {
+	Create(config map[string]interface{}) error
+	Connect(target Block) error
+	Update(config map[string]interface{}) error
+	Delete() error
+	Status() string
+	Start() error
+	Stop() error
+}

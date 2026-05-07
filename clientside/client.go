@@ -16,7 +16,7 @@ func main() {
         ServerName: "localhost", 
     }
     // Connect to the server
-    conn, err := tls.Dial("tcp", "localhost:8080", config)
+    conn, err := tls.Dial("tcp", "localhost:8443", config)
     if err != nil {
         fmt.Println(err)
         return

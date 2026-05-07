@@ -12,6 +12,40 @@ type LoadBalancer struct {
 	ServerPointer int
 }
 
+type LoadBalancerBlock struct {
+	Algorithm string
+}
+
+func (b *LoadBalancerBlock) Create(config map[string]interface{}) error {
+	// Implementation to be added later
+	return nil
+}
+
+func (b *LoadBalancerBlock) Connect(target common.Block) error {
+	// Implementation to be added later
+	return nil
+}
+
+func (b *LoadBalancerBlock) Update(config map[string]interface{}) error {
+	return nil
+}
+
+func (b *LoadBalancerBlock) Delete() error {
+	return nil
+}
+
+func (b *LoadBalancerBlock) Status() string {
+	return "Active"
+}
+
+func (b *LoadBalancerBlock) Start() error {
+	return nil
+}
+
+func (b *LoadBalancerBlock) Stop() error {
+	return nil
+}
+
 func (loadBalancer *LoadBalancer) AddServer(id int, server common.Server) {
 	_, ok := loadBalancer.Servers[id]
 	if ok {

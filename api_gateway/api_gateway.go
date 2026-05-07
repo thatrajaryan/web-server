@@ -17,6 +17,42 @@ import (
 	"github.com/thatrajaryan/web-server/load_balancer"
 )
 
+type ApiGatewayBlock struct {
+	Port     int
+	CertPath string
+	KeyPath  string
+}
+
+func (b *ApiGatewayBlock) Create(config map[string]interface{}) error {
+	// Implementation to be added later
+	return nil
+}
+
+func (b *ApiGatewayBlock) Connect(target common.Block) error {
+	// Implementation to be added later
+	return nil
+}
+
+func (b *ApiGatewayBlock) Update(config map[string]interface{}) error {
+	return nil
+}
+
+func (b *ApiGatewayBlock) Delete() error {
+	return nil
+}
+
+func (b *ApiGatewayBlock) Status() string {
+	return "Active"
+}
+
+func (b *ApiGatewayBlock) Start() error {
+	return nil
+}
+
+func (b *ApiGatewayBlock) Stop() error {
+	return nil
+}
+
 func ApiGateway() {
 	// 1. Load your certificate and private key
 	cert, err := tls.LoadX509KeyPair("server.pem", "server.key")
@@ -27,7 +63,7 @@ func ApiGateway() {
     config := &tls.Config{Certificates: []tls.Certificate{cert}}
 
     // 3. Create a TLS listener instead of net.Listen
-    ln, err := tls.Listen("tcp", ":8080", config)
+    ln, err := tls.Listen("tcp", ":8443", config)
     if err != nil {
         log.Fatalf("Failed to start listener: %v", err)
     }
