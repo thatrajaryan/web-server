@@ -2,14 +2,14 @@
 
 A robust, multi-project architectural management system that allows users to design, persist, and manage system infrastructure blueprints using a modular React frontend and a high-performance Go backend.
 
-## 🏗 Architecture
+## Architecture
 
 The project is built with a decoupled architecture:
 - **Frontend**: React-based canvas using **React Flow** for the diagramming engine and **Framer Motion** for a premium UI/UX.
 - **Backend**: Go API server utilizing the **Strategy Pattern** for database operations and logging.
 - **Database**: PostgreSQL for persistent storage of projects, nodes, and connections.
 
-## 🚀 Features
+## Features
 
 - **Multi-Project Management**: Create, list, and delete multiple architecture projects.
 - **Interactive Canvas**: Drag-and-drop infrastructure blocks (API Gateways, Load Balancers, Databases, etc.).
@@ -17,7 +17,7 @@ The project is built with a decoupled architecture:
 - **Transactional Safety**: Atomic operations for deleting projects and nodes to maintain data integrity.
 - **Premium Design**: Modern aesthetic with glassmorphism and smooth animations.
 
-## 🛠 Tech Stack
+## Tech Stack
 
 - **Backend**: Go (Golang)
 - **Frontend**: React, Vite, TypeScript, React Flow, Framer Motion, Lucide React
@@ -26,7 +26,7 @@ The project is built with a decoupled architecture:
 
 ---
 
-## 🚦 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -79,7 +79,7 @@ The frontend will be available at `http://localhost:5173`.
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```text
 ├── api/                # Core Go API logic
@@ -94,6 +94,6 @@ The frontend will be available at `http://localhost:5173`.
 └── main.go             # Application entry point
 ```
 
-## 📝 License
+## License
 
 This project is for educational purposes. Feel free to modify and extend it!
