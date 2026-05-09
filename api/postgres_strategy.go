@@ -57,3 +57,36 @@ func (p *PostgresStrategy) Query(query string, args ...interface{}) (interface{}
 	}
 	return p.db.Query(query, args...)
 }
+
+func (p *PostgresStrategy) Exec(query string, args ...interface{}) (sql.Result, error) {
+	if p.db == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+	return p.db.Exec(query, args...)
+}
+
+func (p *PostgresStrategy) Begin() (*sql.Tx, error) {
+	if p.db == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+	return p.db.Begin()
+}
+
+func (p *PostgresStrategy) Migrate() error {
+	if p.db == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	schema, err := os.ReadFile("api/models/schema.sql")
+	if err != nil {
+		return fmt.Errorf("error reading schema file: %v", err)
+	}
+
+	_, err = p.db.Exec(string(schema))
+	if err != nil {
+		return fmt.Errorf("error executing schema: %v", err)
+	}
+
+	log.Println("Database migration completed successfully")
+	return nil
+}

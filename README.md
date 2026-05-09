@@ -1,29 +1,99 @@
-# Web Server
+# Architectural Blueprint
 
-Background Services implementation in Go from scratch. The constituent services is - 
+A robust, multi-project architectural management system that allows users to design, persist, and manage system infrastructure blueprints using a modular React frontend and a high-performance Go backend.
 
-## Server
-Backend Server that performs the service. 
+## 🏗 Architecture
 
-## API Gateway
-The first interface a request hits. It houses the Load Balancer and Rate Limiter
+The project is built with a decoupled architecture:
+- **Frontend**: React-based canvas using **React Flow** for the diagramming engine and **Framer Motion** for a premium UI/UX.
+- **Backend**: Go API server utilizing the **Strategy Pattern** for database operations and logging.
+- **Database**: PostgreSQL for persistent storage of projects, nodes, and connections.
 
-## Load Balancer
-Takes in a list of available servers and forwards a request to its suitable server. Algorithms available
- - Round Robin
- - Consistent Hashing
+## 🚀 Features
 
-## Rate Limiter
-Limit the access to the server based on frequency of request from a pariticular user / ip address. 
+- **Multi-Project Management**: Create, list, and delete multiple architecture projects.
+- **Interactive Canvas**: Drag-and-drop infrastructure blocks (API Gateways, Load Balancers, Databases, etc.).
+- **Real-time Persistence**: Node positions and configurations are automatically saved to the database.
+- **Transactional Safety**: Atomic operations for deleting projects and nodes to maintain data integrity.
+- **Premium Design**: Modern aesthetic with glassmorphism and smooth animations.
 
-## Database
-Database implemtations that can be used to persist data. Following strategies implemented 
- - Local file
- - MySQL
- - MongoDB
+## 🛠 Tech Stack
 
-## Content Delivery Network (CDN)
-Cache static data closer to the user to server it without adding an overhead to the server
+- **Backend**: Go (Golang)
+- **Frontend**: React, Vite, TypeScript, React Flow, Framer Motion, Lucide React
+- **Database**: PostgreSQL (Dockerized)
+- **Networking**: Axios (Frontend), `github.com/rs/cors` (Backend)
 
-## Kafka
-Message Queue that focuses on low latency message queue to act as the output of servers to ensure it is not queued at the server.
+---
+
+## 🚦 Getting Started
+
+### Prerequisites
+
+- **Go**: 1.18 or higher
+- **Node.js**: 16.x or higher (npm or yarn)
+- **Docker**: For running the PostgreSQL instance
+
+### 1. Database Setup
+
+The application expects a PostgreSQL instance. The easiest way to start is using Docker:
+
+```bash
+docker run --name local-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres
+```
+
+The application will automatically perform migrations and create the necessary tables (`projects`, `nodes`, `connections`) upon startup.
+
+### 2. Backend Configuration
+
+Create a `.env` file in the root directory:
+
+```env
+hostname=localhost
+port=5432
+POSGRES_PASSWORD=postgres
+```
+
+### 3. Running the Backend
+
+Install dependencies and start the Go server:
+
+```bash
+go mod tidy
+go run main.go
+```
+
+The API will be available at `http://localhost:8080`.
+
+### 4. Running the Frontend
+
+Navigate to the `app` directory, install dependencies, and start the development server:
+
+```bash
+cd app
+npm install
+npm run dev
+```
+
+The frontend will be available at `http://localhost:5173`.
+
+---
+
+## 📂 Project Structure
+
+```text
+├── api/                # Core Go API logic
+│   ├── models/         # Database models and SQL schemas
+│   └── ...             # Strategy implementations (DB, Logging)
+├── app/                # React Frontend
+│   ├── src/
+│   │   ├── components/ # Reusable UI and Canvas components
+│   │   └── pages/      # Landing and Canvas pages
+├── api_gateway/        # Experimental Gateway logic
+├── common/             # Shared Go types
+└── main.go             # Application entry point
+```
+
+## 📝 License
+
+This project is for educational purposes. Feel free to modify and extend it!

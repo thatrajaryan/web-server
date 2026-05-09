@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/thatrajaryan/web-server/api/models"
@@ -64,6 +65,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	// Project Management
 	mux.HandleFunc("/projects", LoggingMiddleware(handleListProjects))
 	mux.HandleFunc("/create/project", LoggingMiddleware(handleCreateProject))
+	mux.HandleFunc("/project/delete", LoggingMiddleware(handleDeleteProject))
 	mux.HandleFunc("/project/", LoggingMiddleware(handleProjectDetails))
 
 	// Block Creation
@@ -78,6 +80,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 
 	// Connection
 	mux.HandleFunc("/create/connection", LoggingMiddleware(handleConnect))
+	mux.HandleFunc("/connection/delete", LoggingMiddleware(handleDeleteConnection))
 
 	// Lifecycle Management
 	mux.HandleFunc("/blocks", LoggingMiddleware(handleListBlocks))
@@ -203,14 +206,64 @@ func handleConnect(w http.ResponseWriter, r *http.Request) {
 	sendResponse(w, http.StatusOK, "Success", fmt.Sprintf("Connected %s to %s", req.FromID, req.ToID), nil)
 }
 
-func handleUpdateBlock(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	regMu.RLock()
-	block, ok := registry[id]
-	regMu.RUnlock()
+func handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-	if !ok {
-		sendResponse(w, http.StatusNotFound, "Error", "Block not found", nil)
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		// Fallback: try source/target if ID is not provided
+		source := r.URL.Query().Get("source")
+		target := r.URL.Query().Get("target")
+		if source != "" && target != "" {
+			if globalDB != nil {
+				_, err := globalDB.Query("DELETE FROM connections WHERE from_node_id = $1 AND to_node_id = $2", source, target)
+				if err != nil {
+					LogError(fmt.Sprintf("Failed to delete connection %s -> %s: %v", source, target, err))
+					sendResponse(w, http.StatusInternalServerError, "Error", "Failed to delete connection", nil)
+					return
+				}
+				sendResponse(w, http.StatusOK, "Success", "Connection deleted", nil)
+				return
+			}
+		}
+		sendResponse(w, http.StatusBadRequest, "Error", "Connection ID or source/target missing", nil)
+		return
+	}
+
+	if globalDB == nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database not initialized", nil)
+		return
+	}
+
+	_, err := globalDB.Query("DELETE FROM connections WHERE id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to delete connection %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to delete connection", nil)
+		return
+	}
+
+	LogInfo(fmt.Sprintf("Connection %s deleted from DB", id))
+	sendResponse(w, http.StatusOK, "Success", "Connection deleted", nil)
+}
+
+func handleUpdateBlock(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Node ID missing", nil)
 		return
 	}
 
@@ -220,15 +273,42 @@ func handleUpdateBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := block.Update(req.Config); err != nil {
-		sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to update block: %v", err), nil)
-		return
+	// Update in registry (in-memory)
+	regMu.RLock()
+	block, ok := registry[id]
+	regMu.RUnlock()
+
+	if ok {
+		if err := block.Update(req.Config); err != nil {
+			LogError(fmt.Sprintf("Failed to update in-memory block %s: %v", id, err))
+		}
 	}
+
+	// Persist to DB
+	if globalDB != nil {
+		configJSON, _ := json.Marshal(req.Config)
+		_, err := globalDB.Exec("UPDATE nodes SET config = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", string(configJSON), id)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to update node %s in DB: %v", id, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to update database", nil)
+			return
+		}
+		LogInfo(fmt.Sprintf("Successfully persisted new configuration for node %s", id))
+	}
+
 	sendResponse(w, http.StatusOK, "Success", "Block updated", nil)
 }
 
 func handleDeleteBlock(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
 	id := r.URL.Query().Get("id")
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Node ID missing", nil)
+		return
+	}
+
 	regMu.Lock()
 	block, ok := registry[id]
 	if ok {
@@ -238,10 +318,45 @@ func handleDeleteBlock(w http.ResponseWriter, r *http.Request) {
 	regMu.Unlock()
 
 	if !ok {
-		sendResponse(w, http.StatusNotFound, "Error", "Block not found", nil)
-		return
+		// Even if not in registry, we should try to delete from DB
+		LogInfo(fmt.Sprintf("Block %s not found in registry, attempting DB cleanup only", id))
 	}
-	sendResponse(w, http.StatusOK, "Success", "Block deleted", nil)
+
+	// Transactional DB Cleanup
+	if globalDB != nil {
+		tx, err := globalDB.Begin()
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to start node deletion transaction: %v", err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Internal server error", nil)
+			return
+		}
+		defer tx.Rollback()
+
+		// 1. Delete all connections involving this node
+		_, err = tx.Exec("DELETE FROM connections WHERE from_node_id = $1 OR to_node_id = $1", id)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to delete connections for node %s: %v", id, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to cleanup connections", nil)
+			return
+		}
+
+		// 2. Delete the node itself
+		_, err = tx.Exec("DELETE FROM nodes WHERE id = $1", id)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to delete node %s from DB: %v", id, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to delete node", nil)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			LogError(fmt.Sprintf("Failed to commit node deletion for %s: %v", id, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to finalize deletion", nil)
+			return
+		}
+		LogInfo(fmt.Sprintf("Node %s and all its connections deleted transactionally", id))
+	}
+
+	sendResponse(w, http.StatusOK, "Success", "Block and its connections deleted", nil)
 }
 
 func handleBlockStatus(w http.ResponseWriter, r *http.Request) {
@@ -300,15 +415,104 @@ func handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := globalDB.Query("SELECT id, name, description, created_at, updated_at FROM projects ORDER BY updated_at DESC")
+	rowsInterface, err := globalDB.Query("SELECT id, name, description, created_at, updated_at FROM projects ORDER BY updated_at DESC")
 	if err != nil {
-		sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to fetch projects: %v", err), nil)
+		LogError(fmt.Sprintf("Failed to fetch projects from DB: %v", err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to fetch projects", nil)
 		return
 	}
-	// Note: In a real app we'd scan rows properly. For this POC, we'll return mock if DB query fails or use a simpler way.
-	// Since the Strategy Pattern Query returns interface{}, we'll assume it works or return empty for now.
-	// Implementing proper row scanning would require more complex reflection or interface changes.
-	sendResponse(w, http.StatusOK, "Success", "Projects listed", []models.Project{})
+
+	rows, ok := rowsInterface.(*sql.Rows)
+	if !ok {
+		LogError("Failed to cast rowsInterface to *sql.Rows")
+		sendResponse(w, http.StatusInternalServerError, "Error", "Internal server error: unexpected DB response type", nil)
+		return
+	}
+	defer rows.Close()
+
+	projects := []models.Project{}
+	count := 0
+	for rows.Next() {
+		count++
+		var p models.Project
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			LogError(fmt.Sprintf("Failed to scan project row %d: %v", count, err))
+			continue
+		}
+		projects = append(projects, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		LogError(fmt.Sprintf("Error during rows iteration: %v", err))
+	}
+
+	LogInfo(fmt.Sprintf("Fetched %d projects from database", len(projects)))
+	sendResponse(w, http.StatusOK, "Success", "Projects listed", projects)
+}
+
+func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Project ID missing", nil)
+		return
+	}
+
+	if globalDB == nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database not initialized", nil)
+		return
+	}
+
+	// Start a transaction for manual cascading delete
+	tx, err := globalDB.Begin()
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to start transaction: %v", err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to start deletion transaction", nil)
+		return
+	}
+	// Ensure rollback on failure
+	defer tx.Rollback()
+
+	// 1. Delete all connections belonging to this project
+	_, err = tx.Exec("DELETE FROM connections WHERE project_id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to delete connections for project %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to cleanup connections", nil)
+		return
+	}
+
+	// 2. Delete all nodes belonging to this project
+	_, err = tx.Exec("DELETE FROM nodes WHERE project_id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to delete nodes for project %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to cleanup nodes", nil)
+		return
+	}
+
+	// 3. Finally, delete the project itself
+	_, err = tx.Exec("DELETE FROM projects WHERE id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to delete project %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to delete project", nil)
+		return
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		LogError(fmt.Sprintf("Failed to commit deletion transaction for project %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to finalize deletion", nil)
+		return
+	}
+
+	LogInfo(fmt.Sprintf("Project %s and all its associated components were manually deleted in a single transaction", id))
+	sendResponse(w, http.StatusOK, "Success", "Project and its components deleted", nil)
 }
 
 func handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -372,10 +576,72 @@ func handleProjectDetails(w http.ResponseWriter, r *http.Request) {
 	if handleOptions(w, r) {
 		return
 	}
-	// Note: In a real app we'd use a router to get {id}
-	// For this POC, we'll return an empty structure that the frontend expects
+	if globalDB == nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database not initialized", nil)
+		return
+	}
+
+	// Extract project ID from /project/{id}/details
+	path := r.URL.Path
+	// Using a robust way to get the ID
+	id := ""
+	pathParts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(pathParts) >= 2 {
+		id = pathParts[1]
+	}
+
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Project ID missing", nil)
+		return
+	}
+
+	// Fetch Nodes
+	nodeRowsInterface, err := globalDB.Query("SELECT id, type, config FROM nodes WHERE project_id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to fetch nodes for project %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to fetch project data", nil)
+		return
+	}
+	nodeRows := nodeRowsInterface.(*sql.Rows)
+	defer nodeRows.Close()
+
+	nodes := []models.Node{}
+	for nodeRows.Next() {
+		var n models.Node
+		var configStr string
+		if err := nodeRows.Scan(&n.ID, &n.Type, &configStr); err != nil {
+			continue
+		}
+		json.Unmarshal([]byte(configStr), &n.Config)
+		nodes = append(nodes, n)
+	}
+
+	// Fetch Connections
+	connRowsInterface, err := globalDB.Query("SELECT id, from_node_id, to_node_id FROM connections WHERE project_id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to fetch connections for project %s: %v", id, err))
+	} else {
+		connRows := connRowsInterface.(*sql.Rows)
+		defer connRows.Close()
+
+		connections := []models.Connection{}
+		for connRows.Next() {
+			var c models.Connection
+			if err := connRows.Scan(&c.ID, &c.FromNodeID, &c.ToNodeID); err != nil {
+				continue
+			}
+			connections = append(connections, c)
+		}
+
+		sendResponse(w, http.StatusOK, "Success", "Project details retrieved", map[string]interface{}{
+			"nodes":       nodes,
+			"connections": connections,
+		})
+		return
+	}
+
 	sendResponse(w, http.StatusOK, "Success", "Project details retrieved", map[string]interface{}{
-		"nodes":       []models.Node{},
+		"nodes":       nodes,
 		"connections": []models.Connection{},
 	})
 }
@@ -391,18 +657,12 @@ func handleListBlocks(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendResponse(w http.ResponseWriter, code int, status, message string, data interface{}) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(Response{Status: status, Message: message, Data: data})
 }
 
 func handleOptions(w http.ResponseWriter, r *http.Request) bool {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return true

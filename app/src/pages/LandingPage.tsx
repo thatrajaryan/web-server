@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Folder, Clock, ChevronRight, X } from 'lucide-react';
+import { Plus, Folder, Clock, ChevronRight, X, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient, type Project } from '../api/client';
 
@@ -13,18 +13,18 @@ export const LandingPage = () => {
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        const response = await apiClient.get('/projects');
-        setProjects(response.data.data || []);
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchProjects = async () => {
+    try {
+      const response = await apiClient.get('/projects');
+      setProjects(response.data.data || []);
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchProjects();
   }, []);
 
@@ -45,6 +45,21 @@ export const LandingPage = () => {
       alert('Failed to create project. Please ensure the backend is running.');
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleDeleteProject = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation(); // Prevent navigating to project
+    if (!window.confirm('Are you sure you want to delete this project and all its components? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await apiClient.delete(`/project/delete?id=${id}`);
+      fetchProjects(); // Refresh list
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      alert('Failed to delete project.');
     }
   };
 
@@ -85,14 +100,30 @@ export const LandingPage = () => {
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '16px'
+                gap: '16px',
+                position: 'relative',
+                overflow: 'hidden'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '12px', borderRadius: '12px' }}>
                   <Folder color="#3b82f6" />
                 </div>
-                <ChevronRight color="var(--text-secondary)" size={20} />
+                <button 
+                  onClick={(e) => handleDeleteProject(e, project.id)}
+                  style={{ 
+                    background: 'rgba(239, 68, 68, 0.1)', 
+                    border: 'none', 
+                    color: '#ef4444', 
+                    padding: '8px', 
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  className="delete-btn-hover"
+                >
+                  <Trash2 size={18} />
+                </button>
               </div>
               <div>
                 <h3 style={{ fontSize: '1.25rem', marginBottom: '4px' }}>{project.name}</h3>
