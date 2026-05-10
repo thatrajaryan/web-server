@@ -1,0 +1,14 @@
+label: "Kafka Cluster"
+fields:
+  - name: "partitions"
+    label: "Partitions"
+    type: "number"
+    default: 3
+  - name: "replication"
+    label: "Replication Factor"
+    type: "number"
+    default: 2
+  - name: "retention"
+    label: "Retention (Hours)"
+    type: "number"
+    default: 168

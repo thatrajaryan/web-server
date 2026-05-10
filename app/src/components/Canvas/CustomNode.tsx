@@ -1,21 +1,42 @@
 import React, { memo } from 'react';
-import { Handle, Position } from 'reactflow';
+import { Handle, Position, type NodeProps } from 'reactflow';
+import {
+  Zap,
+  Cpu,
+  Share2,
+  Database,
+  Server,
+  Globe,
+  Settings
+} from 'lucide-react';
 
-export const CustomNode = memo(({ data }: any) => {
+const IconMap: Record<string, any> = {
+  'api-gateway': Zap,
+  'code': Cpu,
+  'kafka': Share2,
+  'database': Database,
+  'server': Server,
+  'cdn': Globe,
+};
+
+export const CustomNode = memo(({ data, selected }: NodeProps) => {
+  const IconComponent = IconMap[data.type] || Settings;
+
   return (
     <div style={{
-      background: 'rgba(30, 41, 59, 0.7)',
-      backdropFilter: 'blur(16px)',
-      border: '1px solid rgba(255, 255, 255, 0.1)',
-      borderRadius: '8px',
-      padding: '10px',
-      minWidth: '120px',
+      background: 'rgba(15, 23, 42, 0.8)',
+      backdropFilter: 'blur(12px)',
+      border: `1px solid ${selected ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)'}`,
+      borderRadius: '12px',
+      padding: '12px',
+      minWidth: '160px',
       color: '#fff',
-      boxShadow: '0 5px 15px rgba(0, 0, 0, 0.5)',
-      position: 'relative',
-      overflow: 'hidden'
+      boxShadow: selected ? '0 0 20px rgba(59, 130, 246, 0.3)' : '0 10px 30px rgba(0, 0, 0, 0.2)',
+      transition: 'all 0.2s ease-in-out',
+      position: 'relative'
     }}>
-      {/* Decorative gradient overlay */}
+      <Handle type="target" position={Position.Left} style={{ background: '#3b82f6', border: 'none' }} />
+
       <div style={{
         position: 'absolute',
         top: 0,
@@ -23,34 +44,35 @@ export const CustomNode = memo(({ data }: any) => {
         right: 0,
         height: '2px',
         background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)',
-        opacity: 0.8
+        opacity: 0.8,
+        borderRadius: '12px 12px 0 0'
       }} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-        <div style={{ 
-          background: 'rgba(59, 130, 246, 0.1)', 
-          padding: '6px', 
+        <div style={{
+          background: 'rgba(59, 130, 246, 0.1)',
+          padding: '6px',
           borderRadius: '6px',
           color: '#3b82f6',
           display: 'flex',
           transform: 'scale(0.8)'
         }}>
-          {data.icon}
+          <IconComponent size={18} />
         </div>
         <div>
           <h4 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{data.label}</h4>
           <span style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            {data.type?.replace('_', ' ')}
+            {data.type?.replace('-', ' ')}
           </span>
         </div>
       </div>
 
-      <div style={{ 
-        fontSize: '0.65rem', 
-        color: 'rgba(255,255,255,0.6)', 
+      <div style={{
+        fontSize: '0.65rem',
+        color: 'rgba(255,255,255,0.6)',
         background: 'rgba(0,0,0,0.2)',
         padding: '4px 8px',
-        borderRadius: '4px',
+        borderRadius: '6px',
         fontFamily: 'monospace',
         overflow: 'hidden',
         textOverflow: 'ellipsis'
@@ -58,16 +80,7 @@ export const CustomNode = memo(({ data }: any) => {
         {data.id}
       </div>
 
-      <Handle
-        type="target"
-        position={Position.Top}
-        style={{ background: '#3b82f6', border: '1px solid #1e293b', width: '6px', height: '6px' }}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        style={{ background: '#3b82f6', border: '1px solid #1e293b', width: '6px', height: '6px' }}
-      />
+      <Handle type="source" position={Position.Right} style={{ background: '#8b5cf6', border: 'none' }} />
     </div>
   );
 });

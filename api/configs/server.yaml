@@ -1,0 +1,18 @@
+label: "Compute Server"
+fields:
+  - name: "cpu"
+    label: "vCPUs"
+    type: "number"
+    default: 2
+  - name: "ram"
+    label: "RAM (GB)"
+    type: "number"
+    default: 4
+  - name: "os"
+    label: "Operating System"
+    type: "select"
+    default: "ubuntu-22.04"
+    options:
+      - { label: "Ubuntu 22.04", value: "ubuntu-22.04" }
+      - { label: "Amazon Linux 2", value: "amzn-2" }
+      - { label: "Debian 11", value: "debian-11" }

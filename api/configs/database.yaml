@@ -1,0 +1,14 @@
+label: "Database"
+fields:
+  - name: "engine"
+    label: "Engine"
+    type: "select"
+    default: "postgres"
+    options:
+      - { label: "PostgreSQL", value: "postgres" }
+      - { label: "MongoDB", value: "mongodb" }
+      - { label: "Redis", value: "redis" }
+  - name: "storage"
+    label: "Storage (GB)"
+    type: "number"
+    default: 20

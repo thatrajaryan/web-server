@@ -1,0 +1,20 @@
+label: "API Gateway"
+fields:
+  - name: "port"
+    label: "Port"
+    type: "number"
+    default: 80
+  - name: "rate_limit"
+    label: "Rate Limit (req/sec)"
+    type: "number"
+    default: 100
+    section: "Traffic Management"
+  - name: "lb_algo"
+    label: "LB Algorithm"
+    type: "select"
+    default: "round-robin"
+    section: "Traffic Management"
+    options:
+      - { label: "Round Robin", value: "round-robin" }
+      - { label: "Least Connections", value: "least-connections" }
+      - { label: "IP Hash", value: "ip-hash" }

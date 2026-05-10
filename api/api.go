@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/thatrajaryan/web-server/api/models"
 	"github.com/thatrajaryan/web-server/api_gateway"
@@ -15,8 +19,6 @@ import (
 	"github.com/thatrajaryan/web-server/common"
 	"github.com/thatrajaryan/web-server/database"
 	"github.com/thatrajaryan/web-server/kafka"
-	"github.com/thatrajaryan/web-server/load_balancer"
-	"github.com/thatrajaryan/web-server/rate_limiter"
 	"github.com/thatrajaryan/web-server/server"
 )
 
@@ -69,12 +71,10 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/project/", LoggingMiddleware(handleProjectDetails))
 
 	// Block Creation
-	mux.HandleFunc("/create/api-gateway", LoggingMiddleware(handleCreateBlock("api_gateway")))
-	mux.HandleFunc("/create/load-balancer", LoggingMiddleware(handleCreateBlock("load_balancer")))
+	mux.HandleFunc("/create/api-gateway", LoggingMiddleware(handleCreateBlock("api-gateway")))
 	mux.HandleFunc("/create/code", LoggingMiddleware(handleCreateBlock("code")))
 	mux.HandleFunc("/create/kafka", LoggingMiddleware(handleCreateBlock("kafka")))
 	mux.HandleFunc("/create/database", LoggingMiddleware(handleCreateBlock("database")))
-	mux.HandleFunc("/create/rate-limiter", LoggingMiddleware(handleCreateBlock("rate_limiter")))
 	mux.HandleFunc("/create/server", LoggingMiddleware(handleCreateBlock("server")))
 	mux.HandleFunc("/create/cdn", LoggingMiddleware(handleCreateBlock("cdn")))
 
@@ -82,18 +82,17 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/create/connection", LoggingMiddleware(handleConnect))
 	mux.HandleFunc("/connection/delete", LoggingMiddleware(handleDeleteConnection))
 
-	// Lifecycle Management
+	// Architectural Management
 	mux.HandleFunc("/blocks", LoggingMiddleware(handleListBlocks))
 	mux.HandleFunc("/block/update", LoggingMiddleware(handleUpdateBlock))
 	mux.HandleFunc("/block/delete", LoggingMiddleware(handleDeleteBlock))
-	mux.HandleFunc("/block/status", LoggingMiddleware(handleBlockStatus))
-	mux.HandleFunc("/block/start", LoggingMiddleware(handleBlockStart))
-	mux.HandleFunc("/block/stop", LoggingMiddleware(handleBlockStop))
+	mux.HandleFunc("/block/details/", LoggingMiddleware(handleGetBlock))
+	mux.HandleFunc("/config/", LoggingMiddleware(handleGetConfig))
 }
 
 func LoggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		LogInfo(fmt.Sprintf("Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr))
+		LogInfo(fmt.Sprintf("%s %s", r.Method, r.URL.Path))
 		next(w, r)
 	}
 }
@@ -116,18 +115,14 @@ func handleCreateBlock(blockType string) http.HandlerFunc {
 
 		var block common.Block
 		switch blockType {
-		case "api_gateway":
+		case "api-gateway":
 			block = &api_gateway.ApiGatewayBlock{}
-		case "load_balancer":
-			block = &load_balancer.LoadBalancerBlock{}
 		case "code":
 			block = &code.CodeBlock{}
 		case "kafka":
 			block = &kafka.KafkaBlock{}
 		case "database":
 			block = &database.DatabaseBlock{}
-		case "rate_limiter":
-			block = &rate_limiter.RateLimiterBlock{}
 		case "server":
 			block = &server.ServerBlock{}
 		case "cdn":
@@ -144,21 +139,27 @@ func handleCreateBlock(blockType string) http.HandlerFunc {
 
 		// Persist to DB
 		if globalDB != nil {
+			// Initialize only with incoming config (like position)
 			configJSON, _ := json.Marshal(req.Config)
-			_, err := globalDB.Query("INSERT INTO nodes (id, project_id, type, config) VALUES ($1, $2, $3, $4)",
+			_, err := globalDB.Exec("INSERT INTO nodes (id, project_id, type, config) VALUES ($1, $2, $3, $4)",
 				req.ID, req.ProjectID, blockType, string(configJSON))
 			if err != nil {
-				LogError(fmt.Sprintf("Failed to persist node to DB: %v", err))
-			} else {
-				LogInfo(fmt.Sprintf("Persisted %s node to DB", blockType))
+				LogError(fmt.Sprintf("Failed to persist node %s to DB: %v", req.ID, err))
+				sendResponse(w, http.StatusInternalServerError, "Error", "Failed to save node to database", nil)
+				return
 			}
+			LogInfo(fmt.Sprintf("Successfully persisted %s node to DB", blockType))
 		}
 
 		regMu.Lock()
 		registry[req.ID] = block
 		regMu.Unlock()
 
-		sendResponse(w, http.StatusCreated, "Success", fmt.Sprintf("%s created with ID %s", blockType, req.ID), nil)
+		if err := block.Create(req.Config); err != nil {
+			LogError(fmt.Sprintf("Failed to initialize live block %s: %v", req.ID, err))
+		}
+
+		sendResponse(w, http.StatusCreated, "Success", fmt.Sprintf("%s created and initialized with ID %s", blockType, req.ID), nil)
 	}
 }
 
@@ -250,6 +251,99 @@ func handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
 
 	LogInfo(fmt.Sprintf("Connection %s deleted from DB", id))
 	sendResponse(w, http.StatusOK, "Success", "Connection deleted", nil)
+}
+
+func handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	// Path format: /config/{type}
+	nodeType := strings.TrimPrefix(r.URL.Path, "/config/")
+	if nodeType == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Node type missing", nil)
+		return
+	}
+
+	configPath := filepath.Join("api", "configs", nodeType+".yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to read config file %s: %v", configPath, err))
+		sendResponse(w, http.StatusNotFound, "Error", "Config not found", nil)
+		return
+	}
+
+	var config interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		LogError(fmt.Sprintf("Failed to unmarshal YAML for %s: %v", nodeType, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to parse config", nil)
+		return
+	}
+
+	// Convert map[interface{}]interface{} to map[string]interface{} for JSON encoding
+	convertedConfig := convertMap(config)
+
+	sendResponse(w, http.StatusOK, "Success", "Config fetched", convertedConfig)
+}
+
+// Helper to convert YAML maps to JSON-compatible maps recursively
+func convertMap(i interface{}) interface{} {
+	switch x := i.(type) {
+	case map[interface{}]interface{}:
+		m2 := map[string]interface{}{}
+		for k, v := range x {
+			m2[fmt.Sprintf("%v", k)] = convertMap(v)
+		}
+		return m2
+	case []interface{}:
+		for i, v := range x {
+			x[i] = convertMap(v)
+		}
+	}
+	return i
+}
+
+func handleGetBlock(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/block/details/")
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Block ID missing", nil)
+		return
+	}
+
+	LogInfo(fmt.Sprintf("Fetching details for block: %s", id))
+
+	if globalDB == nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database not initialized", nil)
+		return
+	}
+
+	row, err := globalDB.Query("SELECT id, project_id, type, config FROM nodes WHERE id = $1", id)
+	if err != nil {
+		LogError(fmt.Sprintf("Database error while fetching block %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database error", nil)
+		return
+	}
+	rows := row.(*sql.Rows)
+	defer rows.Close()
+
+	if !rows.Next() {
+		LogInfo(fmt.Sprintf("Block %s not found in database", id))
+		sendResponse(w, http.StatusNotFound, "Error", "Block not found in database", nil)
+		return
+	}
+
+	var n models.Node
+	var configJSON string
+	if err := rows.Scan(&n.ID, &n.ProjectID, &n.Type, &configJSON); err != nil {
+		LogError(fmt.Sprintf("Failed to scan block %s: %v", id, err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Internal server error", nil)
+		return
+	}
+	json.Unmarshal([]byte(configJSON), &n.Config)
+
+	sendResponse(w, http.StatusOK, "Success", "Block fetched", n)
 }
 
 func handleUpdateBlock(w http.ResponseWriter, r *http.Request) {
@@ -359,52 +453,6 @@ func handleDeleteBlock(w http.ResponseWriter, r *http.Request) {
 	sendResponse(w, http.StatusOK, "Success", "Block and its connections deleted", nil)
 }
 
-func handleBlockStatus(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	regMu.RLock()
-	block, ok := registry[id]
-	regMu.RUnlock()
-
-	if !ok {
-		sendResponse(w, http.StatusNotFound, "Error", "Block not found", nil)
-		return
-	}
-	sendResponse(w, http.StatusOK, "Success", "Block status retrieved", block.Status())
-}
-
-func handleBlockStart(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	regMu.RLock()
-	block, ok := registry[id]
-	regMu.RUnlock()
-
-	if !ok {
-		sendResponse(w, http.StatusNotFound, "Error", "Block not found", nil)
-		return
-	}
-	if err := block.Start(); err != nil {
-		sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to start block: %v", err), nil)
-		return
-	}
-	sendResponse(w, http.StatusOK, "Success", "Block started", nil)
-}
-
-func handleBlockStop(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	regMu.RLock()
-	block, ok := registry[id]
-	regMu.RUnlock()
-
-	if !ok {
-		sendResponse(w, http.StatusNotFound, "Error", "Block not found", nil)
-		return
-	}
-	if err := block.Stop(); err != nil {
-		sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to stop block: %v", err), nil)
-		return
-	}
-	sendResponse(w, http.StatusOK, "Success", "Block stopped", nil)
-}
 
 func handleListProjects(w http.ResponseWriter, r *http.Request) {
 	if handleOptions(w, r) {

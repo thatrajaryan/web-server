@@ -1,0 +1,10 @@
+label: "CDN / Edge"
+fields:
+  - name: "ttl"
+    label: "Cache TTL (sec)"
+    type: "number"
+    default: 3600
+  - name: "compression"
+    label: "Gzip Compression"
+    type: "boolean"
+    default: true

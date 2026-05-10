@@ -2,17 +2,17 @@ package common
 
 type HttpRequest struct {
 	Header map[string]string
-	Body string
+	Body   string
 }
 
 type HttpResponse struct {
-	Status int
+	Status  int
 	Message string
 }
 
 type Server struct {
 	IpAddress string
-	Port int
+	Port      int
 }
 
 type Block interface {
@@ -20,7 +20,4 @@ type Block interface {
 	Connect(target Block) error
 	Update(config map[string]interface{}) error
 	Delete() error
-	Status() string
-	Start() error
-	Stop() error
 }

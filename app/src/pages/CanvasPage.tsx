@@ -13,7 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Play, Square, Trash2, X, Share2 } from 'lucide-react';
+import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BlockPalette, blockTypes } from '../components/Sidebar/BlockPalette';
 import { CustomNode } from '../components/Canvas/CustomNode';
@@ -32,6 +32,10 @@ export const CanvasPage = () => {
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [configSchema, setConfigSchema] = useState<any>(null);
+  const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const loadProject = async () => {
@@ -47,7 +51,6 @@ export const CanvasPage = () => {
           data: { 
             ...n.config, 
             label: blockTypes.find(b => b.type === n.type)?.label,
-            icon: blockTypes.find(b => b.type === n.type)?.icon,
             id: n.id,
             type: n.type
           }
@@ -64,6 +67,53 @@ export const CanvasPage = () => {
     };
     loadProject();
   }, [projectId, setNodes, setEdges]);
+
+  // Handle Dual-Call Configuration Loading
+  useEffect(() => {
+    const fetchNodeConfigAndSchema = async () => {
+      if (!selectedNode) {
+        setConfigSchema(null);
+        setConfigError(null);
+        return;
+      }
+
+      setIsLoadingConfig(true);
+      setConfigError(null);
+      
+      try {
+        // 1. Fetch Structure (YAML from Backend)
+        try {
+          const schemaRes = await apiClient.get(`/config/${selectedNode.data.type}`);
+          setConfigSchema(schemaRes.data.data);
+        } catch (err) {
+          console.error('Failed to fetch schema:', err);
+          setConfigError('Could not load configuration schema from backend.');
+        }
+
+        // 2. Fetch Values (Database State)
+        try {
+          const valuesRes = await apiClient.get(`/block/details/${selectedNode.id}`);
+          const freshConfig = valuesRes.data.data.config;
+          const updatedNode = {
+            ...selectedNode,
+            data: {
+              ...selectedNode.data,
+              ...freshConfig
+            }
+          };
+          setSelectedNode(updatedNode);
+          setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? updatedNode : n));
+        } catch (err) {
+          console.error('Failed to fetch DB values:', err);
+          // Non-fatal error, we still have the schema and local state
+        }
+      } finally {
+        setIsLoadingConfig(false);
+      }
+    };
+
+    fetchNodeConfigAndSchema();
+  }, [selectedNode?.id]);
 
   const onConnect = useCallback(async (params: Connection) => {
     setEdges((eds) => addEdge(params, eds));
@@ -114,12 +164,12 @@ export const CanvasPage = () => {
         id,
         type: 'custom',
         position,
-        data: { label: blockInfo?.label, type, id, icon: blockInfo?.icon },
+        data: { label: blockInfo?.label, type, id },
       };
 
       setNodes((nds) => nds.concat(newNode));
       try {
-        await apiClient.post(`/create/${type.replace('_', '-')}`, {
+        await apiClient.post(`/create/${type}`, {
           id: id,
           project_id: projectId,
           config: { position }
@@ -151,6 +201,33 @@ export const CanvasPage = () => {
     setSelectedNode(node);
   }, []);
 
+  const handleUpdateConfig = (field: string, value: any) => {
+    if (!selectedNode) return;
+    const updatedNode = {
+      ...selectedNode,
+      data: {
+        ...selectedNode.data,
+        [field]: value
+      }
+    };
+    setSelectedNode(updatedNode);
+    setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? updatedNode : n));
+  };
+
+  const saveNodeConfig = async () => {
+    if (!selectedNode) return;
+    setIsSaving(true);
+    try {
+      await apiClient.put(`/block/update?id=${selectedNode.id}`, {
+        config: { ...selectedNode.data, position: selectedNode.position }
+      });
+    } catch (error) {
+      console.error('Failed to save node config:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleDeleteNode = useCallback(async () => {
     if (!selectedNode) return;
     if (!window.confirm(`Delete ${selectedNode.data.type}?`)) return;
@@ -176,10 +253,66 @@ export const CanvasPage = () => {
     }
   }, [selectedEdge, setEdges]);
 
+  const renderDynamicFields = () => {
+    if (!configSchema || !selectedNode) return null;
+
+    const sections: Record<string, any[]> = { "General": [] };
+    configSchema.fields.forEach((field: any) => {
+      const sectionName = field.section || "General";
+      if (!sections[sectionName]) sections[sectionName] = [];
+      sections[sectionName].push(field);
+    });
+
+    return Object.entries(sections).map(([sectionName, fields]) => (
+      <div key={sectionName} style={{ marginBottom: '24px' }}>
+        {sectionName !== "General" && (
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#3b82f6', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {sectionName}
+          </p>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {fields.map((field) => (
+            <div key={field.name} className="input-group">
+              <label>{field.label}</label>
+              {field.type === 'select' ? (
+                <select
+                  value={selectedNode.data[field.name] || ''}
+                  onChange={(e) => handleUpdateConfig(field.name, e.target.value)}
+                  style={{ width: '100%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px' }}
+                >
+                  <option value="" disabled>Select {field.label}...</option>
+                  {field.options.map((opt: any) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              ) : field.type === 'boolean' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedNode.data[field.name] ?? false}
+                    onChange={(e) => handleUpdateConfig(field.name, e.target.checked)}
+                  />
+                  <span style={{ fontSize: '0.9rem' }}>Enabled</span>
+                </div>
+              ) : (
+                <input
+                  type={field.type}
+                  value={selectedNode.data[field.name] ?? ''}
+                  placeholder={`Enter ${field.label.toLowerCase()}...`}
+                  onChange={(e) => handleUpdateConfig(field.name, field.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value)}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    ));
+  };
+
   return (
     <div className="canvas-container" ref={reactFlowWrapper} style={{ height: '100vh', width: '100vw' }}>
       <ReactFlowProvider>
-        <ReactFlow
+        <Flow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
@@ -197,15 +330,15 @@ export const CanvasPage = () => {
         >
           <Background color="#1e293b" gap={20} />
           <Controls />
-          
+
           <Panel position="top-left" style={{ margin: '20px' }}>
-            <div style={{ 
+            <div style={{
               display: 'flex', flexDirection: 'column', gap: '16px', background: 'var(--panel-bg)',
               backdropFilter: 'blur(16px)', padding: '20px', borderRadius: '24px',
               border: '1px solid var(--border-color)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', width: '260px'
             }}>
-              <button 
-                onClick={() => navigate('/')} className="btn" 
+              <button
+                onClick={() => navigate('/')} className="btn"
                 style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '12px' }}
               >
                 <ChevronLeft size={18} /> Back to Projects
@@ -218,36 +351,62 @@ export const CanvasPage = () => {
           <AnimatePresence>
             {(selectedNode || selectedEdge) && (
               <Panel position="top-right" style={{ margin: '20px' }}>
-                <motion.div 
+                <motion.div
                   initial={{ x: 320, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 320, opacity: 0 }}
                   style={{
                     background: 'var(--panel-bg)', backdropFilter: 'blur(16px)', padding: '24px', borderRadius: '24px',
-                    border: '1px solid var(--border-color)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', width: '300px', color: '#fff'
+                    border: '1px solid var(--border-color)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', width: '300px', color: '#fff',
+                    maxHeight: 'calc(100vh - 80px)', overflowY: 'auto'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.2rem' }}>{selectedNode ? 'Block Config' : 'Link Config'}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <Settings size={20} style={{ color: '#3b82f6' }} />
+                      <h3 style={{ margin: 0, fontSize: '1.2rem' }}>{selectedNode ? 'Block Config' : 'Link Config'}</h3>
+                    </div>
                     <button onClick={() => { setSelectedNode(null); setSelectedEdge(null); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}>
                       <X size={20} />
                     </button>
                   </div>
-                  
-                  {selectedNode ? (
+
+                  {isLoadingConfig ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px 0' }}>
+                      <Loader2 className="animate-spin" size={32} style={{ color: '#3b82f6' }} />
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading Configuration...</p>
+                    </div>
+                  ) : configError ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px 0', color: '#ef4444', textAlign: 'center' }}>
+                      <AlertCircle size={32} />
+                      <p style={{ fontSize: '0.9rem' }}>{configError}</p>
+                      <button 
+                        onClick={() => setSelectedNode({ ...selectedNode! })}
+                        style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : selectedNode ? (
                     <>
                       <div className="input-group" style={{ marginBottom: '16px' }}>
-                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>ID</label>
-                        <input value={selectedNode.id} readOnly style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)' }} />
-                      </div>
-                      <div className="input-group" style={{ marginBottom: '24px' }}>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Type</label>
                         <div style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', padding: '10px', borderRadius: '12px', textAlign: 'center', fontWeight: 600 }}>
-                          {selectedNode.data.type?.replace('_', ' ')}
+                          {configSchema?.label || selectedNode.data.type?.replace('_', ' ')}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <button className="btn" style={{ width: '100%', background: '#3b82f6' }}><Play size={16} /> Start Block</button>
-                        <button className="btn" style={{ width: '100%', background: 'rgba(255, 255, 255, 0.05)' }}><Square size={16} /> Stop Block</button>
-                        <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+
+                      <div style={{ height: '1px', background: 'var(--border-color)', margin: '20px 0' }} />
+
+                      {renderDynamicFields()}
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '24px' }}>
+                        <button
+                          onClick={saveNodeConfig}
+                          className="btn"
+                          style={{ width: '100%', background: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                          disabled={isSaving}
+                        >
+                          <Save size={16} /> {isSaving ? 'Saving...' : 'Save Configuration'}
+                        </button>
                         <button onClick={handleDeleteNode} className="btn" style={{ width: '100%', background: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                           <Trash2 size={16} /> Delete Node
                         </button>
@@ -281,8 +440,12 @@ export const CanvasPage = () => {
           }}>
             <Share2 size={20} /> Deploy Architecture
           </button>
-        </ReactFlow>
+        </Flow>
       </ReactFlowProvider>
     </div>
   );
+};
+
+const Flow = ({ children, ...props }: any) => {
+  return <ReactFlow {...props}>{children}</ReactFlow>;
 };

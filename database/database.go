@@ -1,40 +1,39 @@
 package database
 
 import (
+	"fmt"
 	"github.com/thatrajaryan/web-server/common"
 )
 
 type DatabaseBlock struct {
 	Type       string
 	ConnString string
+	StorageGB  int
 }
 
 func (b *DatabaseBlock) Create(config map[string]interface{}) error {
-	// Implementation to be added later
-	return nil
+	return b.Update(config)
 }
 
 func (b *DatabaseBlock) Connect(target common.Block) error {
-	// Implementation to be added later
+	// Implementation to connect to target blocks
 	return nil
 }
 
 func (b *DatabaseBlock) Update(config map[string]interface{}) error {
+	if val, ok := config["type"].(string); ok {
+		b.Type = val
+	}
+	if val, ok := config["connection_string"].(string); ok {
+		b.ConnString = val
+	}
+	if val, ok := config["storage_gb"].(float64); ok {
+		b.StorageGB = int(val)
+	}
+	fmt.Printf("[Database] Configuration updated: Type=%s, Storage=%dGB\n", b.Type, b.StorageGB)
 	return nil
 }
 
 func (b *DatabaseBlock) Delete() error {
-	return nil
-}
-
-func (b *DatabaseBlock) Status() string {
-	return "Active"
-}
-
-func (b *DatabaseBlock) Start() error {
-	return nil
-}
-
-func (b *DatabaseBlock) Stop() error {
 	return nil
 }
