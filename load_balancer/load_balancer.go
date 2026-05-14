@@ -1,64 +1,79 @@
 package load_balancer
 
 import (
-	"log"
+	"fmt"
+	"sync"
 	"github.com/thatrajaryan/web-server/common"
 )
 
-type LoadBalancer struct {
-	Servers map[int]common.Server
-	ServerList []int
-	Pointer int
-	ServerPointer int
-}
-
 type LoadBalancerBlock struct {
-	Algorithm string
+	Algorithm            string
+	HealthCheckInterval int
+	MaxRetries          int
+	mu                  sync.Mutex
+	targets             []common.Block
+	currentIndex        int
 }
 
 func (b *LoadBalancerBlock) Create(config map[string]interface{}) error {
-	// Implementation to be added later
-	return nil
+	fmt.Println("[Load Balancer] Initializing Load Balancer...")
+	b.targets = []common.Block{}
+	return b.Update(config)
 }
 
 func (b *LoadBalancerBlock) Connect(target common.Block) error {
-	// Implementation to be added later
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.targets = append(b.targets, target)
+	fmt.Printf("[Load Balancer] Registered new target. Total targets: %d\n", len(b.targets))
 	return nil
 }
 
 func (b *LoadBalancerBlock) Update(config map[string]interface{}) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	
+	if val, ok := config["algorithm"].(string); ok {
+		b.Algorithm = val
+	}
+	if val, ok := config["health_check_interval"].(float64); ok {
+		b.HealthCheckInterval = int(val)
+	}
+	if val, ok := config["max_retries"].(float64); ok {
+		b.MaxRetries = int(val)
+	}
+
+	fmt.Printf("[Load Balancer] Configuration updated: Algorithm=%s, HealthCheck=%ds, MaxRetries=%d\n",
+		b.Algorithm, b.HealthCheckInterval, b.MaxRetries)
 	return nil
 }
 
 func (b *LoadBalancerBlock) Delete() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.targets = nil
+	fmt.Println("[Load Balancer] All targets deregistered and LB deleted")
 	return nil
 }
 
-func (b *LoadBalancerBlock) Status() string {
-	return "Active"
-}
-
-func (b *LoadBalancerBlock) Start() error {
-	return nil
-}
-
-func (b *LoadBalancerBlock) Stop() error {
-	return nil
-}
-
-func (loadBalancer *LoadBalancer) AddServer(id int, server common.Server) {
-	_, ok := loadBalancer.Servers[id]
-	if ok {
-		log.Fatalf("Server already exists")
-		return
+// NextTarget returns the next block according to the selected algorithm
+func (b *LoadBalancerBlock) NextTarget() common.Block {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	
+	if len(b.targets) == 0 {
+		return nil
 	}
-	loadBalancer.Servers[id] = server
-	loadBalancer.ServerList[loadBalancer.Pointer] = id
-	loadBalancer.Pointer += 1
-}
 
-func (loadBalancer *LoadBalancer) GetServer() common.Server {
-	server, _ := loadBalancer.Servers[loadBalancer.ServerList[loadBalancer.ServerPointer]]
-	loadBalancer.ServerPointer = (loadBalancer.ServerPointer + 1) % loadBalancer.Pointer
-	return server
+	switch b.Algorithm {
+	case "round-robin":
+		target := b.targets[b.currentIndex]
+		b.currentIndex = (b.currentIndex + 1) % len(b.targets)
+		return target
+	case "random":
+		// Simplified random
+		return b.targets[0] 
+	default:
+		return b.targets[0]
+	}
 }

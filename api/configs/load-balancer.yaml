@@ -1,0 +1,15 @@
+label: "Load Balancer"
+fields:
+  - name: "algorithm"
+    label: "Balancing Algorithm"
+    type: "select"
+    options: ["round-robin", "least-connections", "random", "ip-hash"]
+    default: "round-robin"
+  - name: "health_check_interval"
+    label: "Health Check (sec)"
+    type: "number"
+    default: 10
+  - name: "max_retries"
+    label: "Max Retries"
+    type: "number"
+    default: 3

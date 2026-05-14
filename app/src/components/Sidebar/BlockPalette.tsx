@@ -12,7 +12,6 @@ import { motion } from 'framer-motion';
 
 export const blockTypes = [
   { type: 'api-gateway', label: 'API Gateway' },
-  { type: 'code', label: 'Code Block' },
   { type: 'kafka', label: 'Kafka' },
   { type: 'database', label: 'Database' },
   { type: 'server', label: 'Server' },
@@ -21,7 +20,6 @@ export const blockTypes = [
 
 const IconMap: Record<string, any> = {
   'api-gateway': Zap,
-  'code': Cpu,
   'kafka': Share2,
   'database': Database,
   'server': Server,

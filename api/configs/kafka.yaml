@@ -1,14 +1,32 @@
 label: "Kafka Cluster"
 fields:
+  - name: "bootstrap_servers"
+    label: "Bootstrap Servers"
+    type: "text"
+    default: "localhost:9092"
+  - name: "topic"
+    label: "Topic Name"
+    type: "text"
+    default: "system-events"
+  - name: "group_id"
+    label: "Consumer Group ID"
+    type: "text"
+    default: "arch-group"
+  - name: "auto_offset_reset"
+    label: "Auto Offset Reset"
+    type: "select"
+    options: ["earliest", "latest"]
+    default: "earliest"
+  - name: "security_protocol"
+    label: "Security Protocol"
+    type: "select"
+    options: ["PLAINTEXT", "SASL_PLAINTEXT", "SASL_SSL", "SSL"]
+    default: "PLAINTEXT"
   - name: "partitions"
     label: "Partitions"
     type: "number"
-    default: 3
-  - name: "replication"
+    default: 1
+  - name: "replication_factor"
     label: "Replication Factor"
     type: "number"
-    default: 2
-  - name: "retention"
-    label: "Retention (Hours)"
-    type: "number"
-    default: 168
+    default: 1

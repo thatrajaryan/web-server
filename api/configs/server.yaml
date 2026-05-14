@@ -1,18 +1,30 @@
-label: "Compute Server"
+label: "Logic Server (Microservice)"
 fields:
-  - name: "cpu"
-    label: "vCPUs"
+  - name: "service_name"
+    label: "Service Name"
+    type: "text"
+    default: "driver-matching"
+  - name: "image_name"
+    label: "Docker Image Name"
+    type: "text"
+    default: "uber/driver-matching"
+  - name: "repository_url"
+    label: "Repository URL"
+    type: "text"
+    default: "https://github.com/uber/driver-matching"
+  - name: "tag"
+    label: "Image Tag"
+    type: "text"
+    default: "latest"
+  - name: "port"
+    label: "Service Port"
     type: "number"
-    default: 2
-  - name: "ram"
-    label: "RAM (GB)"
+    default: 8080
+  - name: "replicas"
+    label: "Replicas"
     type: "number"
-    default: 4
-  - name: "os"
-    label: "Operating System"
-    type: "select"
-    default: "ubuntu-22.04"
-    options:
-      - { label: "Ubuntu 22.04", value: "ubuntu-22.04" }
-      - { label: "Amazon Linux 2", value: "amzn-2" }
-      - { label: "Debian 11", value: "debian-11" }
+    default: 3
+  - name: "env_vars"
+    label: "Env Variables (KEY=VAL)"
+    type: "text"
+    default: "LOG_LEVEL=info"

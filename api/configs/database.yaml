@@ -1,14 +1,31 @@
-label: "Database"
+label: "Relational & NoSQL Database"
 fields:
   - name: "engine"
-    label: "Engine"
+    label: "Database Engine"
     type: "select"
+    options: ["postgres", "mysql", "mongodb"]
     default: "postgres"
-    options:
-      - { label: "PostgreSQL", value: "postgres" }
-      - { label: "MongoDB", value: "mongodb" }
-      - { label: "Redis", value: "redis" }
-  - name: "storage"
+  - name: "host"
+    label: "Host"
+    type: "text"
+    default: "localhost"
+  - name: "port"
+    label: "Port"
+    type: "number"
+    default: 5432
+  - name: "database_name"
+    label: "Database Name"
+    type: "text"
+    default: "app_db"
+  - name: "username"
+    label: "Username"
+    type: "text"
+    default: "admin"
+  - name: "password"
+    label: "Password"
+    type: "text"
+    default: ""
+  - name: "storage_gb"
     label: "Storage (GB)"
     type: "number"
     default: 20

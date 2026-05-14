@@ -15,10 +15,11 @@ import (
 	"github.com/thatrajaryan/web-server/api/models"
 	"github.com/thatrajaryan/web-server/api_gateway"
 	"github.com/thatrajaryan/web-server/cdn"
-	"github.com/thatrajaryan/web-server/code"
 	"github.com/thatrajaryan/web-server/common"
 	"github.com/thatrajaryan/web-server/database"
 	"github.com/thatrajaryan/web-server/kafka"
+	"github.com/thatrajaryan/web-server/load_balancer"
+	"github.com/thatrajaryan/web-server/rate_limiter"
 	"github.com/thatrajaryan/web-server/server"
 )
 
@@ -55,6 +56,7 @@ type ConnectRequest struct {
 	ProjectID string `json:"project_id"`
 	FromID    string `json:"from_id"`
 	ToID      string `json:"to_id"`
+	HookCode  string `json:"hook_code"`
 }
 
 type Response struct {
@@ -63,20 +65,28 @@ type Response struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+type SaveProjectRequest struct {
+	ProjectID   string              `json:"project_id"`
+	Nodes       []models.Node       `json:"nodes"`
+	Connections []models.Connection `json:"connections"`
+}
+
 func RegisterRoutes(mux *http.ServeMux) {
 	// Project Management
 	mux.HandleFunc("/projects", LoggingMiddleware(handleListProjects))
 	mux.HandleFunc("/create/project", LoggingMiddleware(handleCreateProject))
 	mux.HandleFunc("/project/delete", LoggingMiddleware(handleDeleteProject))
+	mux.HandleFunc("/project/save", LoggingMiddleware(handleSaveProject))
 	mux.HandleFunc("/project/", LoggingMiddleware(handleProjectDetails))
 
 	// Block Creation
 	mux.HandleFunc("/create/api-gateway", LoggingMiddleware(handleCreateBlock("api-gateway")))
-	mux.HandleFunc("/create/code", LoggingMiddleware(handleCreateBlock("code")))
 	mux.HandleFunc("/create/kafka", LoggingMiddleware(handleCreateBlock("kafka")))
 	mux.HandleFunc("/create/database", LoggingMiddleware(handleCreateBlock("database")))
 	mux.HandleFunc("/create/server", LoggingMiddleware(handleCreateBlock("server")))
 	mux.HandleFunc("/create/cdn", LoggingMiddleware(handleCreateBlock("cdn")))
+	mux.HandleFunc("/create/load-balancer", LoggingMiddleware(handleCreateBlock("load-balancer")))
+	mux.HandleFunc("/create/rate-limiter", LoggingMiddleware(handleCreateBlock("rate-limiter")))
 
 	// Connection
 	mux.HandleFunc("/create/connection", LoggingMiddleware(handleConnect))
@@ -113,27 +123,14 @@ func handleCreateBlock(blockType string) http.HandlerFunc {
 			return
 		}
 
-		var block common.Block
-		switch blockType {
-		case "api-gateway":
-			block = &api_gateway.ApiGatewayBlock{}
-		case "code":
-			block = &code.CodeBlock{}
-		case "kafka":
-			block = &kafka.KafkaBlock{}
-		case "database":
-			block = &database.DatabaseBlock{}
-		case "server":
-			block = &server.ServerBlock{}
-		case "cdn":
-			block = &cdn.CdnBlock{}
-		default:
+		block := createBlockInstance(blockType)
+		if block == nil {
 			sendResponse(w, http.StatusBadRequest, "Error", "Unknown block type", nil)
 			return
 		}
 
 		if err := block.Create(req.Config); err != nil {
-			sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to create block: %v", err), nil)
+			sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to initialize block: %v", err), nil)
 			return
 		}
 
@@ -155,10 +152,6 @@ func handleCreateBlock(blockType string) http.HandlerFunc {
 		registry[req.ID] = block
 		regMu.Unlock()
 
-		if err := block.Create(req.Config); err != nil {
-			LogError(fmt.Sprintf("Failed to initialize live block %s: %v", req.ID, err))
-		}
-
 		sendResponse(w, http.StatusCreated, "Success", fmt.Sprintf("%s created and initialized with ID %s", blockType, req.ID), nil)
 	}
 }
@@ -178,13 +171,20 @@ func handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	regMu.RLock()
-	fromBlock, fromOk := registry[req.FromID]
-	toBlock, toOk := registry[req.ToID]
-	regMu.RUnlock()
+	if req.ProjectID == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Project ID is required", nil)
+		return
+	}
 
-	if !fromOk || !toOk {
-		sendResponse(w, http.StatusNotFound, "Error", "One or both blocks not found", nil)
+	fromBlock, err := getOrLoadBlock(req.FromID)
+	if err != nil {
+		sendResponse(w, http.StatusNotFound, "Error", fmt.Sprintf("Source block %s not found: %v", req.FromID, err), nil)
+		return
+	}
+
+	toBlock, err := getOrLoadBlock(req.ToID)
+	if err != nil {
+		sendResponse(w, http.StatusNotFound, "Error", fmt.Sprintf("Target block %s not found: %v", req.ToID, err), nil)
 		return
 	}
 
@@ -195,13 +195,14 @@ func handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	// Persist to DB
 	if globalDB != nil {
-		_, err := globalDB.Query("INSERT INTO connections (project_id, from_node_id, to_node_id) VALUES ($1, $2, $3)",
-			req.ProjectID, req.FromID, req.ToID)
+		_, err := globalDB.Exec("INSERT INTO connections (project_id, from_node_id, to_node_id, hook_code) VALUES ($1, $2, $3, $4)",
+			req.ProjectID, req.FromID, req.ToID, req.HookCode)
 		if err != nil {
 			LogError(fmt.Sprintf("Failed to persist connection to DB: %v", err))
-		} else {
-			LogInfo("Persisted connection to DB")
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to save connection to database", nil)
+			return
 		}
+		LogInfo("Persisted connection to DB")
 	}
 
 	sendResponse(w, http.StatusOK, "Success", fmt.Sprintf("Connected %s to %s", req.FromID, req.ToID), nil)
@@ -223,7 +224,7 @@ func handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
 		target := r.URL.Query().Get("target")
 		if source != "" && target != "" {
 			if globalDB != nil {
-				_, err := globalDB.Query("DELETE FROM connections WHERE from_node_id = $1 AND to_node_id = $2", source, target)
+				_, err := globalDB.Exec("DELETE FROM connections WHERE from_node_id = $1 AND to_node_id = $2", source, target)
 				if err != nil {
 					LogError(fmt.Sprintf("Failed to delete connection %s -> %s: %v", source, target, err))
 					sendResponse(w, http.StatusInternalServerError, "Error", "Failed to delete connection", nil)
@@ -242,7 +243,7 @@ func handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := globalDB.Query("DELETE FROM connections WHERE id = $1", id)
+	_, err := globalDB.Exec("DELETE FROM connections WHERE id = $1", id)
 	if err != nil {
 		LogError(fmt.Sprintf("Failed to delete connection %s: %v", id, err))
 		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to delete connection", nil)
@@ -368,11 +369,8 @@ func handleUpdateBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update in registry (in-memory)
-	regMu.RLock()
-	block, ok := registry[id]
-	regMu.RUnlock()
-
-	if ok {
+	block, err := getOrLoadBlock(id)
+	if err == nil {
 		if err := block.Update(req.Config); err != nil {
 			LogError(fmt.Sprintf("Failed to update in-memory block %s: %v", id, err))
 		}
@@ -403,17 +401,17 @@ func handleDeleteBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	regMu.Lock()
-	block, ok := registry[id]
-	if ok {
+	block, err := getOrLoadBlock(id)
+	if err == nil {
 		block.Delete()
-		delete(registry, id)
 	}
+	regMu.Lock()
+	delete(registry, id)
 	regMu.Unlock()
 
-	if !ok {
-		// Even if not in registry, we should try to delete from DB
-		LogInfo(fmt.Sprintf("Block %s not found in registry, attempting DB cleanup only", id))
+	if err != nil {
+		// Even if not in registry/DB as a live block, we should try to delete from DB
+		LogInfo(fmt.Sprintf("Block %s not found for live deletion, attempting DB cleanup only", id))
 	}
 
 	// Transactional DB Cleanup
@@ -644,7 +642,7 @@ func handleProjectDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch Nodes
-	nodeRowsInterface, err := globalDB.Query("SELECT id, type, config FROM nodes WHERE project_id = $1", id)
+	nodeRowsInterface, err := globalDB.Query("SELECT id, project_id, type, config, created_at, updated_at FROM nodes WHERE project_id = $1", id)
 	if err != nil {
 		LogError(fmt.Sprintf("Failed to fetch nodes for project %s: %v", id, err))
 		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to fetch project data", nil)
@@ -657,15 +655,18 @@ func handleProjectDetails(w http.ResponseWriter, r *http.Request) {
 	for nodeRows.Next() {
 		var n models.Node
 		var configStr string
-		if err := nodeRows.Scan(&n.ID, &n.Type, &configStr); err != nil {
+		if err := nodeRows.Scan(&n.ID, &n.ProjectID, &n.Type, &configStr, &n.CreatedAt, &n.UpdatedAt); err != nil {
+			LogError(fmt.Sprintf("Failed to scan node row for project %s: %v", id, err))
 			continue
 		}
-		json.Unmarshal([]byte(configStr), &n.Config)
+		if err := json.Unmarshal([]byte(configStr), &n.Config); err != nil {
+			LogError(fmt.Sprintf("Failed to unmarshal config for node %s: %v", n.ID, err))
+		}
 		nodes = append(nodes, n)
 	}
 
 	// Fetch Connections
-	connRowsInterface, err := globalDB.Query("SELECT id, from_node_id, to_node_id FROM connections WHERE project_id = $1", id)
+	connRowsInterface, err := globalDB.Query("SELECT id, project_id, from_node_id, to_node_id, hook_code, created_at FROM connections WHERE project_id = $1", id)
 	if err != nil {
 		LogError(fmt.Sprintf("Failed to fetch connections for project %s: %v", id, err))
 	} else {
@@ -675,7 +676,8 @@ func handleProjectDetails(w http.ResponseWriter, r *http.Request) {
 		connections := []models.Connection{}
 		for connRows.Next() {
 			var c models.Connection
-			if err := connRows.Scan(&c.ID, &c.FromNodeID, &c.ToNodeID); err != nil {
+			if err := connRows.Scan(&c.ID, &c.ProjectID, &c.FromNodeID, &c.ToNodeID, &c.HookCode, &c.CreatedAt); err != nil {
+				LogError(fmt.Sprintf("Failed to scan connection row for project %s: %v", id, err))
 				continue
 			}
 			connections = append(connections, c)
@@ -694,6 +696,80 @@ func handleProjectDetails(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleSaveProject(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req SaveProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendResponse(w, http.StatusBadRequest, "Error", "Invalid request body", nil)
+		return
+	}
+
+	if globalDB == nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database not initialized", nil)
+		return
+	}
+
+	tx, err := globalDB.Begin()
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to start transaction: %v", err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to start save transaction", nil)
+		return
+	}
+	defer tx.Rollback()
+
+	// 1. Upsert Nodes
+	for _, n := range req.Nodes {
+		configJSON, _ := json.Marshal(n.Config)
+		_, err := tx.Exec(`
+			INSERT INTO nodes (id, project_id, type, config) 
+			VALUES ($1, $2, $3, $4) 
+			ON CONFLICT (id) 
+			DO UPDATE SET config = EXCLUDED.config, updated_at = CURRENT_TIMESTAMP`,
+			n.ID, req.ProjectID, n.Type, string(configJSON))
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to upsert node %s: %v", n.ID, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to save node %s", n.ID), nil)
+			return
+		}
+
+		// Also ensure live registry is updated
+		if _, err := getOrLoadBlock(n.ID); err != nil {
+			LogError(fmt.Sprintf("Failed to load/init live block %s: %v", n.ID, err))
+		}
+	}
+
+	// 2. Upsert Connections
+	for _, c := range req.Connections {
+		_, err := tx.Exec(`
+			INSERT INTO connections (project_id, from_node_id, to_node_id, hook_code) 
+			VALUES ($1, $2, $3, $4) 
+			ON CONFLICT (from_node_id, to_node_id) 
+			DO UPDATE SET hook_code = EXCLUDED.hook_code`,
+			req.ProjectID, c.FromNodeID, c.ToNodeID, c.HookCode)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to upsert connection: %v", err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to save connections", nil)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		LogError(fmt.Sprintf("Failed to commit save transaction: %v", err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to finalize save", nil)
+		return
+	}
+
+	LogInfo(fmt.Sprintf("Project %s saved successfully with %d nodes and %d connections", req.ProjectID, len(req.Nodes), len(req.Connections)))
+	sendResponse(w, http.StatusOK, "Success", "Project saved successfully", nil)
+}
+
 func handleListBlocks(w http.ResponseWriter, r *http.Request) {
 	regMu.RLock()
 	ids := make([]string, 0, len(registry))
@@ -702,6 +778,78 @@ func handleListBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 	regMu.RUnlock()
 	sendResponse(w, http.StatusOK, "Success", "Blocks listed", ids)
+}
+
+func createBlockInstance(blockType string) common.Block {
+	switch blockType {
+	case "api-gateway":
+		return &api_gateway.ApiGatewayBlock{}
+	case "kafka":
+		return &kafka.KafkaBlock{}
+	case "database":
+		return &database.DatabaseBlock{}
+	case "server":
+		return &server.ServerBlock{}
+	case "cdn":
+		return &cdn.CdnBlock{}
+	case "load-balancer":
+		return &load_balancer.LoadBalancerBlock{}
+	case "rate-limiter":
+		return &rate_limiter.RateLimiterBlock{}
+	default:
+		return nil
+	}
+}
+
+func getOrLoadBlock(id string) (common.Block, error) {
+	regMu.RLock()
+	block, ok := registry[id]
+	regMu.RUnlock()
+
+	if ok {
+		return block, nil
+	}
+
+	// Not in registry, try to load from DB
+	if globalDB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	rowInterface, err := globalDB.Query("SELECT type, config FROM nodes WHERE id = $1", id)
+	if err != nil {
+		return nil, err
+	}
+	rows := rowInterface.(*sql.Rows)
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, fmt.Errorf("node not found in database")
+	}
+
+	var blockType, configJSON string
+	if err := rows.Scan(&blockType, &configJSON); err != nil {
+		return nil, err
+	}
+
+	var config map[string]interface{}
+	json.Unmarshal([]byte(configJSON), &config)
+
+	block = createBlockInstance(blockType)
+	if block == nil {
+		return nil, fmt.Errorf("unknown block type: %s", blockType)
+	}
+
+	if err := block.Create(config); err != nil {
+		LogError(fmt.Sprintf("Failed to initialize loaded block %s: %v", id, err))
+		// Continue anyway as we have the instance
+	}
+
+	regMu.Lock()
+	registry[id] = block
+	regMu.Unlock()
+
+	LogInfo(fmt.Sprintf("Successfully loaded block %s from DB into registry", id))
+	return block, nil
 }
 
 func sendResponse(w http.ResponseWriter, code int, status, message string, data interface{}) {

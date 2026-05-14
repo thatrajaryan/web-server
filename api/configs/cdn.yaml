@@ -1,10 +1,14 @@
-label: "CDN / Edge"
+label: "Edge CDN"
 fields:
+  - name: "cache_size"
+    label: "Cache Size (Entries)"
+    type: "number"
+    default: 1000
   - name: "ttl"
-    label: "Cache TTL (sec)"
+    label: "Default TTL (seconds)"
     type: "number"
     default: 3600
   - name: "compression"
-    label: "Gzip Compression"
+    label: "Enable Compression"
     type: "boolean"
     default: true

@@ -13,7 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle } from 'lucide-react';
+import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BlockPalette, blockTypes } from '../components/Sidebar/BlockPalette';
 import { CustomNode } from '../components/Canvas/CustomNode';
@@ -36,6 +36,8 @@ export const CanvasPage = () => {
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
   useEffect(() => {
     const loadProject = async () => {
@@ -60,6 +62,7 @@ export const CanvasPage = () => {
           id: c.id,
           source: c.from_node_id,
           target: c.to_node_id,
+          data: { hook_code: c.hook_code || '' }
         })));
       } catch (error) {
         console.error('Failed to load project:', error);
@@ -116,15 +119,16 @@ export const CanvasPage = () => {
   }, [selectedNode?.id]);
 
   const onConnect = useCallback(async (params: Connection) => {
-    setEdges((eds) => addEdge(params, eds));
+    setEdges((eds) => addEdge({ ...params, data: { hook_code: '' } }, eds));
     try {
       await apiClient.post('/create/connection', {
         project_id: projectId,
         from_id: params.source,
-        to_id: params.target
+        to_id: params.target,
+        hook_code: ''
       });
     } catch (error) {
-      console.error('Failed to save connection:', error);
+      console.error('Failed to create connection:', error);
     }
   }, [projectId, setEdges]);
 
@@ -221,10 +225,45 @@ export const CanvasPage = () => {
       await apiClient.put(`/block/update?id=${selectedNode.id}`, {
         config: { ...selectedNode.data, position: selectedNode.position }
       });
+      setSaveStatus({ type: 'success', message: 'Node configuration saved!' });
+      setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
       console.error('Failed to save node config:', error);
+      setSaveStatus({ type: 'error', message: 'Failed to save node config.' });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveProject = async () => {
+    if (!projectId) return;
+    setIsSavingProject(true);
+    setSaveStatus(null);
+    try {
+      const payload = {
+        project_id: projectId,
+        nodes: nodes.map(n => ({
+          id: n.id,
+          project_id: projectId,
+          type: n.data.type,
+          config: { ...n.data, position: n.position }
+        })),
+        connections: edges.map(e => ({
+          project_id: projectId,
+          from_node_id: e.source,
+          to_node_id: e.target,
+          hook_code: e.data?.hook_code || ''
+        }))
+      };
+
+      await apiClient.post('/project/save', payload);
+      setSaveStatus({ type: 'success', message: 'Project saved successfully!' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error) {
+      console.error('Failed to save project:', error);
+      setSaveStatus({ type: 'error', message: 'Failed to save project. Please try again.' });
+    } finally {
+      setIsSavingProject(false);
     }
   };
 
@@ -344,9 +383,58 @@ export const CanvasPage = () => {
                 <ChevronLeft size={18} /> Back to Projects
               </button>
               <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+              <button
+                onClick={handleSaveProject}
+                className="btn"
+                disabled={isSavingProject}
+                style={{ 
+                  width: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  gap: '10px', 
+                  background: 'linear-gradient(135deg, #059669, #10b981)', 
+                  border: 'none', 
+                  padding: '12px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)'
+                }}
+              >
+                {isSavingProject ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                {isSavingProject ? 'Saving...' : 'Save Project'}
+              </button>
+              <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
               <BlockPalette />
             </div>
           </Panel>
+
+          <AnimatePresence>
+            {saveStatus && (
+              <motion.div
+                initial={{ y: -50, opacity: 0, x: '-50%' }}
+                animate={{ y: 0, opacity: 1, x: '-50%' }}
+                exit={{ y: -50, opacity: 0, x: '-50%' }}
+                style={{
+                  position: 'fixed',
+                  top: '20px',
+                  left: '50%',
+                  zIndex: 1000,
+                  background: saveStatus.type === 'success' ? '#059669' : '#ef4444',
+                  color: '#fff',
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  fontWeight: 500
+                }}
+              >
+                {saveStatus.type === 'success' ? <Save size={18} /> : <AlertCircle size={18} />}
+                {saveStatus.message}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {(selectedNode || selectedEdge) && (
@@ -418,13 +506,38 @@ export const CanvasPage = () => {
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>From</label>
                         <div style={{ fontSize: '0.8rem', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', fontFamily: 'monospace' }}>{selectedEdge.source}</div>
                       </div>
-                      <div className="input-group" style={{ marginBottom: '24px' }}>
+                      <div className="input-group" style={{ marginBottom: '16px' }}>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>To</label>
                         <div style={{ fontSize: '0.8rem', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', fontFamily: 'monospace' }}>{selectedEdge.target}</div>
                       </div>
-                      <button onClick={handleDeleteEdge} className="btn" style={{ width: '100%', background: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <Trash2 size={16} /> Delete Connection
-                      </button>
+                      
+                      <div style={{ height: '1px', background: 'var(--border-color)', margin: '20px 0' }} />
+                      
+                      <div className="input-group" style={{ marginBottom: '16px' }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Cpu size={14} /> Connection Hook (Go)
+                        </label>
+                        <textarea
+                          value={selectedEdge.data?.hook_code || ''}
+                          onChange={(e) => {
+                            const newCode = e.target.value;
+                            setEdges(eds => eds.map(edge => edge.id === selectedEdge.id ? { ...edge, data: { ...edge.data, hook_code: newCode } } : edge));
+                            setSelectedEdge(prev => prev ? { ...prev, data: { ...prev.data, hook_code: newCode } } : null);
+                          }}
+                          placeholder="// Intercept request here\nfunc Handle(req *http.Request) {\n  // your logic\n}"
+                          style={{
+                            width: '100%', minHeight: '150px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)',
+                            borderRadius: '12px', color: '#fff', padding: '12px', fontSize: '0.85rem', fontFamily: 'monospace',
+                            marginTop: '8px', outline: 'none', resize: 'vertical'
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                        <button onClick={handleDeleteEdge} className="btn" style={{ width: '100%', background: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                          <Trash2 size={16} /> Delete Connection
+                        </button>
+                      </div>
                     </>
                   )}
                 </motion.div>
