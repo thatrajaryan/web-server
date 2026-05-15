@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/thatrajaryan/web-server/api/models"
+	"github.com/thatrajaryan/web-server/ai"
 	"github.com/thatrajaryan/web-server/api_gateway"
 	"github.com/thatrajaryan/web-server/cdn"
 	"github.com/thatrajaryan/web-server/common"
@@ -71,16 +73,32 @@ type SaveProjectRequest struct {
 	Connections []models.Connection `json:"connections"`
 }
 
+type YamlProjectConfig struct {
+	ProjectName string `yaml:"project_name"`
+	Nodes       []struct {
+		ID     string                 `yaml:"id"`
+		Type   string                 `yaml:"type"`
+		Config map[string]interface{} `yaml:"config"`
+	} `yaml:"nodes"`
+	Connections []struct {
+		From     string `yaml:"from"`
+		To       string `yaml:"to"`
+		HookCode string `yaml:"hook_code"`
+	} `yaml:"connections"`
+}
+
 func RegisterRoutes(mux *http.ServeMux) {
 	// Project Management
 	mux.HandleFunc("/projects", LoggingMiddleware(handleListProjects))
 	mux.HandleFunc("/create/project", LoggingMiddleware(handleCreateProject))
 	mux.HandleFunc("/project/delete", LoggingMiddleware(handleDeleteProject))
 	mux.HandleFunc("/project/save", LoggingMiddleware(handleSaveProject))
+	mux.HandleFunc("/project/upload-config", LoggingMiddleware(handleUploadConfig))
 	mux.HandleFunc("/project/", LoggingMiddleware(handleProjectDetails))
 
 	// Block Creation
 	mux.HandleFunc("/create/api-gateway", LoggingMiddleware(handleCreateBlock("api-gateway")))
+	mux.HandleFunc("/create/ai", LoggingMiddleware(handleCreateBlock("ai")))
 	mux.HandleFunc("/create/kafka", LoggingMiddleware(handleCreateBlock("kafka")))
 	mux.HandleFunc("/create/database", LoggingMiddleware(handleCreateBlock("database")))
 	mux.HandleFunc("/create/server", LoggingMiddleware(handleCreateBlock("server")))
@@ -784,6 +802,8 @@ func createBlockInstance(blockType string) common.Block {
 	switch blockType {
 	case "api-gateway":
 		return &api_gateway.ApiGatewayBlock{}
+	case "ai":
+		return &ai.AIBlock{}
 	case "kafka":
 		return &kafka.KafkaBlock{}
 	case "database":
@@ -864,4 +884,100 @@ func handleOptions(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	return false
+}
+
+func handleUploadConfig(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB limit
+		sendResponse(w, http.StatusBadRequest, "Error", "Failed to parse form", nil)
+		return
+	}
+
+	file, _, err := r.FormFile("config")
+	if err != nil {
+		sendResponse(w, http.StatusBadRequest, "Error", "Config file missing", nil)
+		return
+	}
+	defer file.Close()
+
+	fileBytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to read file", nil)
+		return
+	}
+
+	// 2. Parse YAML
+	var config YamlProjectConfig
+	if err := yaml.Unmarshal(fileBytes, &config); err != nil {
+		sendResponse(w, http.StatusBadRequest, "Error", fmt.Sprintf("Invalid YAML: %v", err), nil)
+		return
+	}
+
+	if globalDB == nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Database not initialized", nil)
+		return
+	}
+
+	// 3. Database Transaction
+	tx, err := globalDB.Begin()
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to start transaction", nil)
+		return
+	}
+	defer tx.Rollback()
+
+	// 3a. Create Project
+	var projectID string
+	err = tx.QueryRow(
+		"INSERT INTO projects (name, description) VALUES ($1, $2) RETURNING id",
+		config.ProjectName, "Imported from YAML config",
+	).Scan(&projectID)
+	if err != nil {
+		LogError(fmt.Sprintf("Failed to create project from YAML: %v", err))
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to create project", nil)
+		return
+	}
+
+	// 3b. Insert Nodes
+	for _, n := range config.Nodes {
+		configJSON, _ := json.Marshal(n.Config)
+		_, err := tx.Exec(
+			"INSERT INTO nodes (id, project_id, type, config) VALUES ($1, $2, $3, $4)",
+			n.ID, projectID, n.Type, string(configJSON),
+		)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to insert node %s: %v", n.ID, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to insert node %s", n.ID), nil)
+			return
+		}
+	}
+
+	// 3c. Insert Connections
+	for _, c := range config.Connections {
+		_, err := tx.Exec(
+			"INSERT INTO connections (project_id, from_node_id, to_node_id, hook_code) VALUES ($1, $2, $3, $4)",
+			projectID, c.From, c.To, c.HookCode,
+		)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to insert connection: %v", err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to insert connections", nil)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to commit transaction", nil)
+		return
+	}
+
+	LogInfo(fmt.Sprintf("Successfully imported project %s from YAML with ID %s", config.ProjectName, projectID))
+	sendResponse(w, http.StatusOK, "Success", "Project imported successfully", map[string]string{"project_id": projectID})
 }

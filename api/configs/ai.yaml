@@ -1,0 +1,23 @@
+label: "AI Model Service"
+fields:
+  - name: "provider"
+    label: "AI Provider"
+    type: "select"
+    options: ["openrouter", "openai", "anthropic"]
+    default: "openrouter"
+  - name: "api_key"
+    label: "API Key"
+    type: "text"
+    default: ""
+  - name: "model"
+    label: "Model Name"
+    type: "text"
+    default: "google/gemini-2.0-flash-001"
+  - name: "max_tokens"
+    label: "Max Tokens"
+    type: "number"
+    default: 1024
+  - name: "temperature"
+    label: "Temperature"
+    type: "number"
+    default: 0.7

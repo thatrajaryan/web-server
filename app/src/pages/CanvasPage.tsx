@@ -13,7 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle, Cpu } from 'lucide-react';
+import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle, Cpu, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BlockPalette, blockTypes } from '../components/Sidebar/BlockPalette';
 import { CustomNode } from '../components/Canvas/CustomNode';
@@ -348,6 +348,34 @@ export const CanvasPage = () => {
     ));
   };
 
+  const handleUploadConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('config', file);
+
+    try {
+      setIsSavingProject(true);
+      const response = await apiClient.post('/project/upload-config', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      const newProjectId = response.data.data.project_id;
+      setSaveStatus({ type: 'success', message: 'Config uploaded! Redirecting...' });
+      setTimeout(() => {
+        navigate(`/canvas/${newProjectId}`);
+        window.location.reload();
+      }, 1500);
+    } catch (error) {
+      console.error('Upload failed:', error);
+      setSaveStatus({ type: 'error', message: 'Failed to upload YAML config.' });
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
+
   return (
     <div className="canvas-container" ref={reactFlowWrapper} style={{ height: '100vh', width: '100vw' }}>
       <ReactFlowProvider>
@@ -403,6 +431,34 @@ export const CanvasPage = () => {
                 {isSavingProject ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                 {isSavingProject ? 'Saving...' : 'Save Project'}
               </button>
+
+              <input
+                type="file"
+                id="config-upload"
+                style={{ display: 'none' }}
+                accept=".yaml,.yml"
+                onChange={handleUploadConfig}
+              />
+              <button
+                onClick={() => document.getElementById('config-upload')?.click()}
+                className="btn"
+                style={{ 
+                  width: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  gap: '10px', 
+                  background: 'rgba(59, 130, 246, 0.1)', 
+                  border: '1px solid rgba(59, 130, 246, 0.3)', 
+                  color: '#3b82f6',
+                  padding: '12px',
+                  fontWeight: 600,
+                  marginTop: '8px'
+                }}
+              >
+                <Upload size={18} /> Upload YAML Config
+              </button>
+
               <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
               <BlockPalette />
             </div>
