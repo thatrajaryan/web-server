@@ -16,6 +16,7 @@ import (
 	"github.com/thatrajaryan/web-server/api/models"
 	"github.com/thatrajaryan/web-server/ai"
 	"github.com/thatrajaryan/web-server/api_gateway"
+	"github.com/thatrajaryan/web-server/helm"
 	"github.com/thatrajaryan/web-server/cdn"
 	"github.com/thatrajaryan/web-server/common"
 	"github.com/thatrajaryan/web-server/database"
@@ -94,6 +95,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/project/delete", LoggingMiddleware(handleDeleteProject))
 	mux.HandleFunc("/project/save", LoggingMiddleware(handleSaveProject))
 	mux.HandleFunc("/project/upload-config", LoggingMiddleware(handleUploadConfig))
+	mux.HandleFunc("/project/generate-helm", LoggingMiddleware(handleGenerateHelm))
 	mux.HandleFunc("/project/", LoggingMiddleware(handleProjectDetails))
 
 	// Block Creation
@@ -113,6 +115,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	// Architectural Management
 	mux.HandleFunc("/blocks", LoggingMiddleware(handleListBlocks))
 	mux.HandleFunc("/block/update", LoggingMiddleware(handleUpdateBlock))
+	mux.HandleFunc("/block/upload-config", LoggingMiddleware(handleUploadNodeConfig))
 	mux.HandleFunc("/block/delete", LoggingMiddleware(handleDeleteBlock))
 	mux.HandleFunc("/block/details/", LoggingMiddleware(handleGetBlock))
 	mux.HandleFunc("/config/", LoggingMiddleware(handleGetConfig))
@@ -980,4 +983,119 @@ func handleUploadConfig(w http.ResponseWriter, r *http.Request) {
 
 	LogInfo(fmt.Sprintf("Successfully imported project %s from YAML with ID %s", config.ProjectName, projectID))
 	sendResponse(w, http.StatusOK, "Success", "Project imported successfully", map[string]string{"project_id": projectID})
+}
+
+func handleUploadNodeConfig(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Node ID missing", nil)
+		return
+	}
+
+	// 1. Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		sendResponse(w, http.StatusBadRequest, "Error", "Failed to parse form", nil)
+		return
+	}
+
+	file, _, err := r.FormFile("config")
+	if err != nil {
+		sendResponse(w, http.StatusBadRequest, "Error", "Config file missing", nil)
+		return
+	}
+	defer file.Close()
+
+	fileBytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to read file", nil)
+		return
+	}
+
+	// 2. Parse YAML
+	var nodeConfig map[string]interface{}
+	if err := yaml.Unmarshal(fileBytes, &nodeConfig); err != nil {
+		sendResponse(w, http.StatusBadRequest, "Error", fmt.Sprintf("Invalid YAML: %v", err), nil)
+		return
+	}
+
+	// 3. Update Block
+	block, err := getOrLoadBlock(id)
+	if err != nil {
+		sendResponse(w, http.StatusNotFound, "Error", fmt.Sprintf("Block %s not found", id), nil)
+		return
+	}
+
+	if err := block.Update(nodeConfig); err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Failed to update block: %v", err), nil)
+		return
+	}
+
+	// 4. Persist to DB
+	if globalDB != nil {
+		configJSON, _ := json.Marshal(nodeConfig)
+		_, err := globalDB.Exec("UPDATE nodes SET config = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", string(configJSON), id)
+		if err != nil {
+			LogError(fmt.Sprintf("Failed to update node %s in DB: %v", id, err))
+			sendResponse(w, http.StatusInternalServerError, "Error", "Failed to update database", nil)
+			return
+		}
+	}
+
+	sendResponse(w, http.StatusOK, "Success", "Node configuration updated via YAML", nodeConfig)
+}
+
+func handleGenerateHelm(w http.ResponseWriter, r *http.Request) {
+	if handleOptions(w, r) {
+		return
+	}
+	id := r.URL.Query().Get("project_id")
+	if id == "" {
+		sendResponse(w, http.StatusBadRequest, "Error", "Project ID missing", nil)
+		return
+	}
+
+	// 1. Fetch Project Data
+	project, err := globalDB.GetProject(id)
+	if err != nil {
+		sendResponse(w, http.StatusNotFound, "Error", "Project not found", nil)
+		return
+	}
+
+	nodes, err := globalDB.GetNodesByProject(id)
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to fetch nodes", nil)
+		return
+	}
+	conns, err := globalDB.GetConnectionsByProject(id)
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", "Failed to fetch connections", nil)
+		return
+	}
+
+	// 2. Generate Helm Chart
+	sanitizedName := strings.ReplaceAll(strings.ToLower(project.Name), " ", "-")
+	gen := helm.HelmGenerator{
+		ProjectID:   id,
+		ProjectName: sanitizedName,
+		Nodes:       nodes,
+		Connections: conns,
+	}
+	chartZip, err := gen.Generate()
+	if err != nil {
+		sendResponse(w, http.StatusInternalServerError, "Error", fmt.Sprintf("Generation failed: %v", err), nil)
+		return
+	}
+
+	// 3. Send ZIP File
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-helm.zip"`, sanitizedName))
+	w.Write(chartZip)
 }

@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import ReactFlow, { 
-  addEdge, 
-  Background, 
-  Controls, 
+import ReactFlow, {
+  addEdge,
+  Background,
+  Controls,
   Panel,
   ReactFlowProvider,
   useNodesState,
@@ -13,11 +13,11 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle, Cpu, Upload } from 'lucide-react';
+import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle, Cpu, Upload, Download, Package, Rocket } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BlockPalette, blockTypes } from '../components/Sidebar/BlockPalette';
 import { CustomNode } from '../components/Canvas/CustomNode';
-import { apiClient } from '../api/client';
+import { apiClient, API_BASE } from '../api/client';
 
 const nodeTypes = {
   custom: CustomNode,
@@ -38,6 +38,9 @@ export const CanvasPage = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingProject, setIsSavingProject] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [isGeneratingHelm, setIsGeneratingHelm] = useState(false);
+  const [newCustomKey, setNewCustomKey] = useState('');
+  const [newCustomValue, setNewCustomValue] = useState('');
 
   useEffect(() => {
     const loadProject = async () => {
@@ -45,19 +48,19 @@ export const CanvasPage = () => {
       try {
         const response = await apiClient.get(`/project/${projectId}/details`);
         const { nodes: savedNodes, connections: savedConns } = response.data.data;
-        
+
         setNodes(savedNodes.map((n: any) => ({
           id: n.id,
           type: 'custom',
           position: n.config?.position || { x: 0, y: 0 },
-          data: { 
-            ...n.config, 
+          data: {
+            ...n.config,
             label: blockTypes.find(b => b.type === n.type)?.label,
             id: n.id,
             type: n.type
           }
         })));
-        
+
         setEdges(savedConns.map((c: any) => ({
           id: c.id,
           source: c.from_node_id,
@@ -82,7 +85,7 @@ export const CanvasPage = () => {
 
       setIsLoadingConfig(true);
       setConfigError(null);
-      
+
       try {
         // 1. Fetch Structure (YAML from Backend)
         try {
@@ -320,9 +323,11 @@ export const CanvasPage = () => {
                   style={{ width: '100%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px' }}
                 >
                   <option value="" disabled>Select {field.label}...</option>
-                  {field.options.map((opt: any) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
+                  {field.options.map((opt: any, index: number) => {
+                    const value = typeof opt === 'string' ? opt : opt.value;
+                    const label = typeof opt === 'string' ? opt : opt.label;
+                    return <option key={index} value={value}>{label}</option>
+                  })}
                 </select>
               ) : field.type === 'boolean' ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -346,6 +351,143 @@ export const CanvasPage = () => {
         </div>
       </div>
     ));
+  };
+
+  const renderCustomFields = () => {
+    if (!selectedNode) return null;
+
+    const reservedKeys = ['id', 'type', 'label', 'position', 'positionAbsolute', 'width', 'height', 'selected', 'dragging'];
+    const schemaKeys = configSchema ? configSchema.fields.map((f: any) => f.name) : [];
+    const customKeys = Object.keys(selectedNode.data || {}).filter(k => !reservedKeys.includes(k) && !schemaKeys.includes(k));
+
+    return (
+      <div style={{ marginTop: '24px' }}>
+        <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#3b82f6', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Custom Configuration
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {customKeys.map(key => (
+            <div key={key} className="input-group" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input 
+                type="text" 
+                value={key} 
+                disabled 
+                style={{ width: '40%', opacity: 0.7, background: 'transparent', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
+              />
+              <input 
+                type="text" 
+                value={selectedNode.data[key] ?? ''} 
+                onChange={(e) => handleUpdateConfig(key, e.target.value)}
+                style={{ width: '50%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
+              />
+              <button 
+                onClick={() => {
+                  const newData = { ...selectedNode.data };
+                  delete newData[key];
+                  const updatedNode = { ...selectedNode, data: newData };
+                  setSelectedNode(updatedNode);
+                  setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? updatedNode : n));
+                }}
+                style={{ width: '10%', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+          
+          <div className="input-group" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="New Key" 
+              value={newCustomKey}
+              onChange={(e) => setNewCustomKey(e.target.value)}
+              style={{ width: '40%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
+            />
+            <input 
+              type="text" 
+              placeholder="Value" 
+              value={newCustomValue}
+              onChange={(e) => setNewCustomValue(e.target.value)}
+              style={{ width: '40%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
+            />
+            <button 
+              onClick={() => {
+                if (newCustomKey && newCustomKey.trim() !== '') {
+                  handleUpdateConfig(newCustomKey.trim(), newCustomValue);
+                  setNewCustomKey('');
+                  setNewCustomValue('');
+                }
+              }}
+              style={{ width: '20%', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', color: '#3b82f6', cursor: 'pointer', padding: '8px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600 }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const handleGenerateHelm = async () => {
+    if (!projectId) return;
+    try {
+      setIsGeneratingHelm(true);
+      setSaveStatus(null);
+      
+      const downloadUrl = `${API_BASE}/project/generate-helm?project_id=${projectId}`;
+      
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('target', '_blank');
+      document.body.appendChild(link);
+      link.click();
+      
+      setTimeout(() => {
+        if (document.body.contains(link)) {
+          document.body.removeChild(link);
+        }
+      }, 100);
+
+      setSaveStatus({ type: 'success', message: 'Helm Chart download started!' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error) {
+      console.error('Helm generation failed:', error);
+      setSaveStatus({ type: 'error', message: 'Failed to initiate Helm Chart download.' });
+    } finally {
+      setTimeout(() => setIsGeneratingHelm(false), 2000);
+    }
+  };
+
+  const handleUploadNodeConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedNode) return;
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('config', file);
+
+    try {
+      setIsSaving(true);
+      const response = await apiClient.post(`/block/upload-config?id=${selectedNode.id}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      const freshConfig = response.data.data;
+      const updatedNode = {
+        ...selectedNode,
+        data: { ...selectedNode.data, ...freshConfig }
+      };
+      setSelectedNode(updatedNode);
+      setNodes((nds) => nds.map((n) => n.id === selectedNode.id ? updatedNode : n));
+      setSaveStatus({ type: 'success', message: 'Node configuration updated via YAML!' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error) {
+      console.error('Node config upload failed:', error);
+      setSaveStatus({ type: 'error', message: 'Failed to upload node YAML.' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleUploadConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -415,14 +557,14 @@ export const CanvasPage = () => {
                 onClick={handleSaveProject}
                 className="btn"
                 disabled={isSavingProject}
-                style={{ 
-                  width: '100%', 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '10px', 
-                  background: 'linear-gradient(135deg, #059669, #10b981)', 
-                  border: 'none', 
+                  gap: '10px',
+                  background: 'linear-gradient(135deg, #059669, #10b981)',
+                  border: 'none',
                   padding: '12px',
                   fontWeight: 600,
                   boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)'
@@ -432,32 +574,6 @@ export const CanvasPage = () => {
                 {isSavingProject ? 'Saving...' : 'Save Project'}
               </button>
 
-              <input
-                type="file"
-                id="config-upload"
-                style={{ display: 'none' }}
-                accept=".yaml,.yml"
-                onChange={handleUploadConfig}
-              />
-              <button
-                onClick={() => document.getElementById('config-upload')?.click()}
-                className="btn"
-                style={{ 
-                  width: '100%', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  gap: '10px', 
-                  background: 'rgba(59, 130, 246, 0.1)', 
-                  border: '1px solid rgba(59, 130, 246, 0.3)', 
-                  color: '#3b82f6',
-                  padding: '12px',
-                  fontWeight: 600,
-                  marginTop: '8px'
-                }}
-              >
-                <Upload size={18} /> Upload YAML Config
-              </button>
 
               <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
               <BlockPalette />
@@ -522,7 +638,7 @@ export const CanvasPage = () => {
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '40px 0', color: '#ef4444', textAlign: 'center' }}>
                       <AlertCircle size={32} />
                       <p style={{ fontSize: '0.9rem' }}>{configError}</p>
-                      <button 
+                      <button
                         onClick={() => setSelectedNode({ ...selectedNode! })}
                         style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
                       >
@@ -541,8 +657,33 @@ export const CanvasPage = () => {
                       <div style={{ height: '1px', background: 'var(--border-color)', margin: '20px 0' }} />
 
                       {renderDynamicFields()}
+                      {renderCustomFields()}
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '24px' }}>
+                        <input
+                          type="file"
+                          id="node-config-upload"
+                          style={{ display: 'none' }}
+                          accept=".yaml,.yml"
+                          onChange={handleUploadNodeConfig}
+                        />
+                        <button
+                          onClick={() => document.getElementById('node-config-upload')?.click()}
+                          className="btn"
+                          style={{ 
+                            width: '100%', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            gap: '8px',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                            color: '#3b82f6'
+                          }}
+                        >
+                          <Upload size={16} /> Upload YAML Config
+                        </button>
+
                         <button
                           onClick={saveNodeConfig}
                           className="btn"
@@ -566,9 +707,9 @@ export const CanvasPage = () => {
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>To</label>
                         <div style={{ fontSize: '0.8rem', padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', fontFamily: 'monospace' }}>{selectedEdge.target}</div>
                       </div>
-                      
+
                       <div style={{ height: '1px', background: 'var(--border-color)', margin: '20px 0' }} />
-                      
+
                       <div className="input-group" style={{ marginBottom: '16px' }}>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <Cpu size={14} /> Connection Hook (Go)
@@ -601,14 +742,55 @@ export const CanvasPage = () => {
             )}
           </AnimatePresence>
 
-          <button className="connection-btn" style={{
+          <button 
+            className="connection-btn" 
+            onClick={handleGenerateHelm}
+            disabled={isGeneratingHelm}
+            style={{
             position: 'fixed', bottom: '40px', left: '50%', transform: 'translateX(-50%)',
             background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', color: '#fff', padding: '16px 32px', borderRadius: '100px',
             border: 'none', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '1rem', fontWeight: 600,
             cursor: 'pointer', boxShadow: '0 10px 40px rgba(59, 130, 246, 0.4)', zIndex: 10
           }}>
-            <Share2 size={20} /> Deploy Architecture
+            {isGeneratingHelm ? <Loader2 className="animate-spin" size={20} /> : <Rocket size={20} />}
+            {isGeneratingHelm ? 'Generating Chart...' : 'Deploy Architecture'}
           </button>
+
+          <AnimatePresence>
+            {isGeneratingHelm && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                style={{
+                  position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+                  background: 'rgba(2, 6, 23, 0.85)', backdropFilter: 'blur(12px)',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  zIndex: 10000, color: '#fff', gap: '24px'
+                }}
+              >
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    style={{
+                      width: '120px', height: '120px', borderRadius: '50%',
+                      border: '4px solid transparent', borderTopColor: '#3b82f6', borderBottomColor: '#8b5cf6'
+                    }}
+                  />
+                  <Package size={48} style={{ position: 'absolute', color: '#3b82f6' }} />
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <h2 style={{ fontSize: '1.8rem', fontWeight: 700, marginBottom: '8px', background: 'linear-gradient(to right, #fff, #94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                    Generating Infrastructure Chart
+                  </h2>
+                  <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '1rem' }}>
+                    Analyzing {nodes.length} nodes and connection hooks...
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </Flow>
       </ReactFlowProvider>
     </div>

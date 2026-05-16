@@ -22,6 +22,7 @@ func main() {
 		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:8080"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		ExposedHeaders:   []string{"Content-Disposition"},
 		AllowCredentials: true,
 	})
 
