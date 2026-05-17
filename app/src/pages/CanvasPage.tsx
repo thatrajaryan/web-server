@@ -13,7 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Trash2, X, Share2, Save, Settings, Loader2, AlertCircle, Cpu, Upload, Download, Package, Rocket } from 'lucide-react';
+import { ChevronLeft, Trash2, X, Save, Settings, Loader2, AlertCircle, Cpu, Upload, Package, Rocket } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BlockPalette, blockTypes } from '../components/Sidebar/BlockPalette';
 import { CustomNode } from '../components/Canvas/CustomNode';
@@ -368,19 +368,19 @@ export const CanvasPage = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {customKeys.map(key => (
             <div key={key} className="input-group" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input 
-                type="text" 
-                value={key} 
-                disabled 
+              <input
+                type="text"
+                value={key}
+                disabled
                 style={{ width: '40%', opacity: 0.7, background: 'transparent', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
               />
-              <input 
-                type="text" 
-                value={selectedNode.data[key] ?? ''} 
+              <input
+                type="text"
+                value={selectedNode.data[key] ?? ''}
                 onChange={(e) => handleUpdateConfig(key, e.target.value)}
                 style={{ width: '50%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
               />
-              <button 
+              <button
                 onClick={() => {
                   const newData = { ...selectedNode.data };
                   delete newData[key];
@@ -394,23 +394,23 @@ export const CanvasPage = () => {
               </button>
             </div>
           ))}
-          
+
           <div className="input-group" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
-            <input 
-              type="text" 
-              placeholder="New Key" 
+            <input
+              type="text"
+              placeholder="New Key"
               value={newCustomKey}
               onChange={(e) => setNewCustomKey(e.target.value)}
               style={{ width: '40%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
             />
-            <input 
-              type="text" 
-              placeholder="Value" 
+            <input
+              type="text"
+              placeholder="Value"
               value={newCustomValue}
               onChange={(e) => setNewCustomValue(e.target.value)}
               style={{ width: '40%', background: '#0f172a', border: '1px solid var(--border-color)', color: '#fff', padding: '8px', borderRadius: '8px', fontSize: '0.85rem' }}
             />
-            <button 
+            <button
               onClick={() => {
                 if (newCustomKey && newCustomKey.trim() !== '') {
                   handleUpdateConfig(newCustomKey.trim(), newCustomValue);
@@ -433,15 +433,15 @@ export const CanvasPage = () => {
     try {
       setIsGeneratingHelm(true);
       setSaveStatus(null);
-      
+
       const downloadUrl = `${API_BASE}/project/generate-helm?project_id=${projectId}`;
-      
+
       const link = document.createElement('a');
       link.href = downloadUrl;
       link.setAttribute('target', '_blank');
       document.body.appendChild(link);
       link.click();
-      
+
       setTimeout(() => {
         if (document.body.contains(link)) {
           document.body.removeChild(link);
@@ -490,33 +490,33 @@ export const CanvasPage = () => {
     }
   };
 
-  const handleUploadConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  // const handleUploadConfig = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  //   const file = event.target.files?.[0];
+  //   if (!file) return;
 
-    const formData = new FormData();
-    formData.append('config', file);
+  //   const formData = new FormData();
+  //   formData.append('config', file);
 
-    try {
-      setIsSavingProject(true);
-      const response = await apiClient.post('/project/upload-config', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      const newProjectId = response.data.data.project_id;
-      setSaveStatus({ type: 'success', message: 'Config uploaded! Redirecting...' });
-      setTimeout(() => {
-        navigate(`/canvas/${newProjectId}`);
-        window.location.reload();
-      }, 1500);
-    } catch (error) {
-      console.error('Upload failed:', error);
-      setSaveStatus({ type: 'error', message: 'Failed to upload YAML config.' });
-    } finally {
-      setIsSavingProject(false);
-    }
-  };
+  //   try {
+  //     setIsSavingProject(true);
+  //     const response = await apiClient.post('/project/upload-config', formData, {
+  //       headers: {
+  //         'Content-Type': 'multipart/form-data',
+  //       },
+  //     });
+  //     const newProjectId = response.data.data.project_id;
+  //     setSaveStatus({ type: 'success', message: 'Config uploaded! Redirecting...' });
+  //     setTimeout(() => {
+  //       navigate(`/canvas/${newProjectId}`);
+  //       window.location.reload();
+  //     }, 1500);
+  //   } catch (error) {
+  //     console.error('Upload failed:', error);
+  //     setSaveStatus({ type: 'error', message: 'Failed to upload YAML config.' });
+  //   } finally {
+  //     setIsSavingProject(false);
+  //   }
+  // };
 
   return (
     <div className="canvas-container" ref={reactFlowWrapper} style={{ height: '100vh', width: '100vw' }}>
@@ -670,10 +670,10 @@ export const CanvasPage = () => {
                         <button
                           onClick={() => document.getElementById('node-config-upload')?.click()}
                           className="btn"
-                          style={{ 
-                            width: '100%', 
-                            display: 'flex', 
-                            alignItems: 'center', 
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
                             justifyContent: 'center',
                             gap: '8px',
                             background: 'rgba(59, 130, 246, 0.1)',
@@ -742,16 +742,16 @@ export const CanvasPage = () => {
             )}
           </AnimatePresence>
 
-          <button 
-            className="connection-btn" 
+          <button
+            className="connection-btn"
             onClick={handleGenerateHelm}
             disabled={isGeneratingHelm}
             style={{
-            position: 'fixed', bottom: '40px', left: '50%', transform: 'translateX(-50%)',
-            background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', color: '#fff', padding: '16px 32px', borderRadius: '100px',
-            border: 'none', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '1rem', fontWeight: 600,
-            cursor: 'pointer', boxShadow: '0 10px 40px rgba(59, 130, 246, 0.4)', zIndex: 10
-          }}>
+              position: 'fixed', bottom: '40px', left: '50%', transform: 'translateX(-50%)',
+              background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', color: '#fff', padding: '16px 32px', borderRadius: '100px',
+              border: 'none', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '1rem', fontWeight: 600,
+              cursor: 'pointer', boxShadow: '0 10px 40px rgba(59, 130, 246, 0.4)', zIndex: 10
+            }}>
             {isGeneratingHelm ? <Loader2 className="animate-spin" size={20} /> : <Rocket size={20} />}
             {isGeneratingHelm ? 'Generating Chart...' : 'Deploy Architecture'}
           </button>
