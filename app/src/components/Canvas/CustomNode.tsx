@@ -7,7 +7,10 @@ import {
   Database,
   Server,
   Globe,
-  Settings
+  Settings,
+  Wind,
+  Flame,
+  Layers
 } from 'lucide-react';
 
 const IconMap: Record<string, any> = {
@@ -17,6 +20,9 @@ const IconMap: Record<string, any> = {
   'database': Database,
   'server': Server,
   'cdn': Globe,
+  'flink': Wind,
+  'spark': Flame,
+  'hadoop': Layers,
 };
 
 export const CustomNode = memo(({ data, selected }: NodeProps) => {

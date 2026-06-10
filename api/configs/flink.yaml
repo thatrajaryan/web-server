@@ -1,0 +1,31 @@
+label: "Flink Cluster"
+fields:
+  - name: "jobmanager_rpc_address"
+    label: "JobManager RPC Address"
+    type: "text"
+    default: "flink-jobmanager"
+  - name: "jobmanager_rpc_port"
+    label: "JobManager RPC Port"
+    type: "number"
+    default: 6123
+  - name: "jobmanager_heap_size"
+    label: "JobManager Heap Size"
+    type: "text"
+    default: "1024m"
+  - name: "taskmanager_heap_size"
+    label: "TaskManager Heap Size"
+    type: "text"
+    default: "1024m"
+  - name: "taskmanager_slots"
+    label: "Task Slots per TM"
+    type: "number"
+    default: 2
+  - name: "parallelism_default"
+    label: "Default Parallelism"
+    type: "number"
+    default: 2
+  - name: "state_backend"
+    label: "State Backend"
+    type: "select"
+    options: ["hashmap", "rocksdb"]
+    default: "hashmap"

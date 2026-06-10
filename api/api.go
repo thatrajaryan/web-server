@@ -24,6 +24,9 @@ import (
 	"github.com/thatrajaryan/web-server/load_balancer"
 	"github.com/thatrajaryan/web-server/rate_limiter"
 	"github.com/thatrajaryan/web-server/server"
+	"github.com/thatrajaryan/web-server/flink"
+	"github.com/thatrajaryan/web-server/spark"
+	"github.com/thatrajaryan/web-server/hadoop"
 )
 
 var (
@@ -107,6 +110,9 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/create/cdn", LoggingMiddleware(handleCreateBlock("cdn")))
 	mux.HandleFunc("/create/load-balancer", LoggingMiddleware(handleCreateBlock("load-balancer")))
 	mux.HandleFunc("/create/rate-limiter", LoggingMiddleware(handleCreateBlock("rate-limiter")))
+	mux.HandleFunc("/create/flink", LoggingMiddleware(handleCreateBlock("flink")))
+	mux.HandleFunc("/create/spark", LoggingMiddleware(handleCreateBlock("spark")))
+	mux.HandleFunc("/create/hadoop", LoggingMiddleware(handleCreateBlock("hadoop")))
 
 	// Connection
 	mux.HandleFunc("/create/connection", LoggingMiddleware(handleConnect))
@@ -819,6 +825,12 @@ func createBlockInstance(blockType string) common.Block {
 		return &load_balancer.LoadBalancerBlock{}
 	case "rate-limiter":
 		return &rate_limiter.RateLimiterBlock{}
+	case "flink":
+		return &flink.FlinkBlock{}
+	case "spark":
+		return &spark.SparkBlock{}
+	case "hadoop":
+		return &hadoop.HadoopBlock{}
 	default:
 		return nil
 	}

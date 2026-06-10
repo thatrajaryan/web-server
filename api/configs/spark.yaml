@@ -1,0 +1,27 @@
+label: "Spark Cluster"
+fields:
+  - name: "master_url"
+    label: "Spark Master URL"
+    type: "text"
+    default: "spark://spark-master:7077"
+  - name: "driver_memory"
+    label: "Driver Memory"
+    type: "text"
+    default: "1g"
+  - name: "executor_memory"
+    label: "Executor Memory"
+    type: "text"
+    default: "1g"
+  - name: "executor_cores"
+    label: "Executor Cores"
+    type: "number"
+    default: 1
+  - name: "deploy_mode"
+    label: "Deploy Mode"
+    type: "select"
+    options: ["client", "cluster"]
+    default: "client"
+  - name: "dynamic_allocation"
+    label: "Dynamic Allocation"
+    type: "boolean"
+    default: false

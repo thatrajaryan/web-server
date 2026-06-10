@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/thatrajaryan/web-server/api/models"
+	"gopkg.in/yaml.v2"
 )
 
 type HelmGenerator struct {
@@ -33,7 +34,10 @@ appVersion: "1.0.0"
 	}
 
 	// Values.yaml
-	valuesYaml := g.generateValues()
+	valuesYaml, err := g.generateValues()
+	if err != nil {
+		return nil, err
+	}
 	if err := g.addToZip(zw, g.ProjectName+"/values.yaml", valuesYaml); err != nil {
 		return nil, err
 	}
@@ -94,19 +98,30 @@ func (g *HelmGenerator) addToZip(zw *zip.Writer, name, content string) error {
 	return err
 }
 
-func (g *HelmGenerator) generateValues() string {
-	var buf bytes.Buffer
-	buf.WriteString("global:\n  environment: production\n\n")
-	for _, node := range g.Nodes {
-		buf.WriteString(fmt.Sprintf("%s:\n", node.ID))
-		buf.WriteString(fmt.Sprintf("  type: %s\n", node.Type))
-		// Serialize config fields into values
-		for k, v := range node.Config {
-			buf.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
-		}
-		buf.WriteString("\n")
+func (g *HelmGenerator) generateValues() (string, error) {
+	valuesMap := map[string]interface{}{
+		"global": map[string]string{
+			"environment": "production",
+		},
 	}
-	return buf.String()
+
+	for _, node := range g.Nodes {
+		nodeConfig := make(map[string]interface{})
+		for k, v := range node.Config {
+			if k != "type" {
+				nodeConfig[k] = v
+			}
+		}
+		nodeConfig["type"] = node.Type
+		valuesMap[node.ID] = nodeConfig
+	}
+
+	yamlBytes, err := yaml.Marshal(valuesMap)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal values: %v", err)
+	}
+
+	return string(yamlBytes), nil
 }
 
 func (g *HelmGenerator) generateDeployment(node models.Node) (string, error) {
@@ -119,27 +134,33 @@ func (g *HelmGenerator) generateDeployment(node models.Node) (string, error) {
 		image = "infrastructure/ai-proxy:latest"
 	} else if node.Type == "api-gateway" {
 		image = "infrastructure/api-gateway:latest"
+	} else if node.Type == "flink" {
+		image = "flink:latest"
+	} else if node.Type == "spark" {
+		image = "bitnami/spark:latest"
+	} else if node.Type == "hadoop" {
+		image = "sequenceiq/hadoop-docker:latest"
 	}
 
 	tmpl := `apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .ID }}
+  name: [[ .ID ]]
 spec:
-  replicas: {{ .Replicas }}
+  replicas: {{ .Values.[[ .ID ]].replicas | default [[ .Replicas ]] }}
   selector:
     matchLabels:
-      app: {{ .ID }}
+      app: [[ .ID ]]
   template:
     metadata:
       labels:
-        app: {{ .ID }}
+        app: [[ .ID ]]
     spec:
       containers:
       - name: main
-        image: {{ .Image }}
+        image: {{ .Values.[[ .ID ]].image | default "[[ .Image ]]" }}
         ports:
-        - containerPort: {{ .Port }}
+        - containerPort: {{ .Values.[[ .ID ]].port | default [[ .Port ]] }}
         env:
         {{- range $key, $value := .Env }}
         - name: {{ $key }}
@@ -152,6 +173,16 @@ spec:
 	}
 
 	port := 8080
+	if node.Type == "flink" {
+		port = 8081
+		if p, ok := node.Config["jobmanager_rpc_port"].(float64); ok {
+			port = int(p)
+		}
+	} else if node.Type == "spark" {
+		port = 8080
+	} else if node.Type == "hadoop" {
+		port = 9870
+	}
 	if p, ok := node.Config["port"].(float64); ok {
 		port = int(p)
 	}
@@ -175,9 +206,14 @@ spec:
 		data.Env = envs
 	}
 
-	t, _ := template.New("deploy").Parse(tmpl)
+	t, err := template.New("deploy").Delims("[[", "]]").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
 	var out bytes.Buffer
-	t.Execute(&out, data)
+	if err := t.Execute(&out, data); err != nil {
+		return "", err
+	}
 	return out.String(), nil
 }
 
@@ -191,14 +227,14 @@ func (g *HelmGenerator) generateService(node models.Node) (string, error) {
 	tmpl := `apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .ID }}
+  name: [[ .ID ]]
 spec:
   selector:
-    app: {{ .ID }}
+    app: [[ .ID ]]
   ports:
   - protocol: TCP
-    port: {{ .Port }}
-    targetPort: {{ .TargetPort }}
+    port: {{ .Values.[[ .ID ]].servicePort | default [[ .Port ]] }}
+    targetPort: {{ .Values.[[ .ID ]].port | default [[ .TargetPort ]] }}
   type: ClusterIP
 `
 	data := struct {
@@ -211,9 +247,14 @@ spec:
 		TargetPort: targetPort,
 	}
 
-	t, _ := template.New("svc").Parse(tmpl)
+	t, err := template.New("svc").Delims("[[", "]]").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
 	var out bytes.Buffer
-	t.Execute(&out, data)
+	if err := t.Execute(&out, data); err != nil {
+		return "", err
+	}
 	return out.String(), nil
 }
 
@@ -221,10 +262,10 @@ func (g *HelmGenerator) generateHookConfigMap(conn models.Connection, index int)
 	tmpl := `apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: hook-code-{{ .Index }}
+  name: hook-code-[[ .Index ]]
 data:
   hook.go: |
-{{ .HookCode | indent 4 }}
+[[ .HookCode | indent 4 ]]
 `
 	funcMap := template.FuncMap{
 		"indent": func(spaces int, v string) string {
@@ -244,9 +285,14 @@ data:
 		HookCode: conn.HookCode,
 	}
 
-	t, _ := template.New("cm").Funcs(funcMap).Parse(tmpl)
+	t, err := template.New("cm").Delims("[[", "]]").Funcs(funcMap).Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
 	var out bytes.Buffer
-	t.Execute(&out, data)
+	if err := t.Execute(&out, data); err != nil {
+		return "", err
+	}
 	return out.String(), nil
 }
 
@@ -254,38 +300,38 @@ func (g *HelmGenerator) generateHookProxy(conn models.Connection, index int) (st
 	tmpl := `apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: hook-proxy-{{ .Index }}
+  name: hook-proxy-[[ .Index ]]
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: hook-proxy-{{ .Index }}
+      app: hook-proxy-[[ .Index ]]
   template:
     metadata:
       labels:
-        app: hook-proxy-{{ .Index }}
+        app: hook-proxy-[[ .Index ]]
     spec:
       containers:
       - name: proxy
         image: infrastructure/hook-proxy:latest
         env:
         - name: TARGET_URL
-          value: "http://{{ .ToID }}"
+          value: "http://[[ .ToID ]]"
         volumeMounts:
         - name: code
           mountPath: /etc/hook
       volumes:
       - name: code
         configMap:
-          name: hook-code-{{ .Index }}
+          name: hook-code-[[ .Index ]]
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: hook-proxy-{{ .Index }}
+  name: hook-proxy-[[ .Index ]]
 spec:
   selector:
-    app: hook-proxy-{{ .Index }}
+    app: hook-proxy-[[ .Index ]]
   ports:
   - protocol: TCP
     port: 80
@@ -299,8 +345,13 @@ spec:
 		ToID:  conn.ToNodeID,
 	}
 
-	t, _ := template.New("proxy").Parse(tmpl)
+	t, err := template.New("proxy").Delims("[[", "]]").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
 	var out bytes.Buffer
-	t.Execute(&out, data)
+	if err := t.Execute(&out, data); err != nil {
+		return "", err
+	}
 	return out.String(), nil
 }

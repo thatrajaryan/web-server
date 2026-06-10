@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Folder, Clock, ChevronRight, X, Trash2 } from 'lucide-react';
+import { Plus, Folder, Clock, X, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient, type Project } from '../api/client';
 
@@ -34,9 +34,9 @@ export const LandingPage = () => {
 
     setIsCreating(true);
     try {
-      const response = await apiClient.post('/create/project', { 
+      const response = await apiClient.post('/create/project', {
         name: newProjectName,
-        description: newProjectDesc 
+        description: newProjectDesc
       });
       const newProject = response.data.data;
       navigate(`/project/${newProject.id}`);
@@ -72,9 +72,9 @@ export const LandingPage = () => {
           </h1>
           <p style={{ color: 'var(--text-secondary)' }}>Design and manage your system infrastructure</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)} 
-          className="btn" 
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="btn"
           style={{ padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <Plus size={20} /> New Project
@@ -109,13 +109,13 @@ export const LandingPage = () => {
                 <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '12px', borderRadius: '12px' }}>
                   <Folder color="#3b82f6" />
                 </div>
-                <button 
+                <button
                   onClick={(e) => handleDeleteProject(e, project.id)}
-                  style={{ 
-                    background: 'rgba(239, 68, 68, 0.1)', 
-                    border: 'none', 
-                    color: '#ef4444', 
-                    padding: '8px', 
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: 'none',
+                    color: '#ef4444',
+                    padding: '8px',
                     borderRadius: '8px',
                     cursor: 'pointer',
                     transition: 'all 0.2s'
@@ -181,7 +181,7 @@ export const LandingPage = () => {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                 <h2 style={{ fontSize: '1.5rem', fontFamily: 'var(--font-heading)' }}>Create New Project</h2>
-                <button 
+                <button
                   onClick={() => setIsModalOpen(false)}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
                 >
@@ -192,7 +192,7 @@ export const LandingPage = () => {
               <form onSubmit={handleCreateProject} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div className="input-group">
                   <label>Project Name</label>
-                  <input 
+                  <input
                     autoFocus
                     placeholder="e.g. My Awesome Architecture"
                     value={newProjectName}
@@ -202,14 +202,14 @@ export const LandingPage = () => {
                 </div>
                 <div className="input-group">
                   <label>Description</label>
-                  <input 
+                  <input
                     placeholder="What is this project about?"
                     value={newProjectDesc}
                     onChange={(e) => setNewProjectDesc(e.target.value)}
                   />
                 </div>
                 <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
                     className="btn"
@@ -217,7 +217,7 @@ export const LandingPage = () => {
                   >
                     Cancel
                   </button>
-                  <button 
+                  <button
                     type="submit"
                     className="btn"
                     style={{ flex: 2 }}

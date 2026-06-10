@@ -6,7 +6,10 @@ import {
   Database,
   Server,
   Globe,
-  Settings
+  Settings,
+  Wind,
+  Flame,
+  Layers
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -17,6 +20,9 @@ export const blockTypes = [
   { type: 'database', label: 'Database' },
   { type: 'server', label: 'Server' },
   { type: 'cdn', label: 'CDN' },
+  { type: 'flink', label: 'Flink Cluster' },
+  { type: 'spark', label: 'Spark Cluster' },
+  { type: 'hadoop', label: 'Hadoop Cluster' },
 ];
 
 const IconMap: Record<string, any> = {
@@ -26,6 +32,9 @@ const IconMap: Record<string, any> = {
   'database': Database,
   'server': Server,
   'cdn': Globe,
+  'flink': Wind,
+  'spark': Flame,
+  'hadoop': Layers,
 };
 
 export const BlockPalette = () => {
